@@ -37,4 +37,20 @@ Then open the PR with gh, watch CI, do not merge.
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/2 (merged 2026-11-14). Decision: [ADR 0002](../adr/0002-crisperwhisper-verbatim-asr.md) Accepted — CrisperWhisper 2.0 large verbatim + verbatim/intended diff + VAD + pause rules; PhoWhisper dropped. Report: [spike](../spikes/2026-11-asr-models.md).
+
+**Worked well**
+- Eval tooling (ingest, prelabel, compare pages, runs table) made a 5-clip × 3-model GPU run and a listening check possible in one evening, without labels.
+- Each model in its own process gave clean per-model RAM/VRAM numbers; CI green on the first run.
+- Raw transcripts and media stayed out of git (only metrics committed).
+
+**Had to be corrected or deviated from the prompt**
+- Follow-up prompts grew the scope (ingest, prelabel, compare_html, guides) mid-task.
+- Windows: pip installs CPU torch; the CUDA wheel download failed twice (network) and needed curl with resume. CTranslate2 needs CUDA 12 cuBLAS/cuDNN next to CUDA 13 torch ([lesson 001](../lessons/001-torch-cuda13-vs-ctranslate2-cuda12.md)).
+- PhoWhisper word timestamps via cross-attention used ~20 GB RAM; replaced by segment timestamps + CTC alignment. The usual WhisperX aligner for Vietnamese had no CTC head.
+- Labelled accuracy was not measured; the decision used speed, memory and a listening check. Moved to LEARNING-206/207.
+- Python heredocs with `\n` got mangled by the shell several times; writing files with the editor tool is safer.
+
+**Next time**
+- Write the decision criteria before running models, and label at least one clip before the first full run.
+- Check every backend's device support (MPS, CUDA version) before choosing it.

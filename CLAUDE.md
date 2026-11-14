@@ -31,7 +31,7 @@ Browser UI (React) talks only to the **API server** (FastAPI): REST + SSE progre
 ## Tech stack
 
 - **Backend:** Python 3.11+, FastAPI, Uvicorn, `multiprocessing`, SQLite, `psutil`, `platformdirs`
-- **ML:** CrisperWhisper 2.0 via PyTorch (`mps` → `cuda` → `cpu`); model choice is confirmed by spike LEARNING-205
+- **ML:** CrisperWhisper 2.0 large, verbatim mode, via PyTorch (`mps` → `cuda` → `cpu`; `turbo` when the RAM pre-flight fails). Cut candidates = verbatim vs intended diff + VAD uncovered segments + pause rules ([ADR 0002](docs/adr/0002-crisperwhisper-verbatim-asr.md))
 - **Media:** FFmpeg (`h264_videotoolbox` → `h264_nvenc` → `libx264`)
 - **Frontend:** React + TypeScript (strict), Vite
 - **Quality:** ruff, mypy, pytest, hypothesis, vitest, Playwright, `@axe-core/playwright`, pre-commit, GitHub Actions

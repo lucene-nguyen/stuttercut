@@ -1,30 +1,56 @@
 # 0002 — CrisperWhisper for verbatim ASR
 
-- **Status:** Proposed — pending spike [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205)
-- **Date:** 2026-11-14
-- **Jira:** LEARNING-234
+- **Status:** Accepted (2026-11-14, after spike [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205))
+- **Date:** 2026-11-14 (proposed in LEARNING-234)
+- **Jira:** LEARNING-234, LEARNING-205
+- **Evidence:** [spike report](../spikes/2026-11-asr-models.md)
 
 ## Context
 
 Detection needs a **verbatim** transcript with accurate **word timestamps**: repeated words,
 fillers ("ờ", "ừm") and false starts must appear in the text. Standard Whisper models clean up
 disfluencies, so they hide exactly what we want to cut. The model must run locally on Apple
-Silicon (`mps`), on CUDA, or on CPU.
+Silicon (`mps`), on CUDA, or on CPU, and fit a 16 GB Mac.
+
+The spike (5 clips, about 11 minutes of speech, no labels yet) showed:
+
+- every candidate wrote very few filler words, so a transcript alone is not enough to find cuts;
+- faster-whisper large-v3 gave the most accurate Vietnamese text in a listening check, but drops
+  stutters (it cleans fillers and repeats out of the transcript);
+- CrisperWhisper 2.0 large in verbatim mode kept the most content (about twice the repeats of
+  the baseline) at RTF 0.36–0.62 on an RTX 4060, 7.9 GB RAM, 5.1 GB VRAM;
+- PhoWhisper was the slowest and heaviest (RTF up to 1.43, 9.3 GB RAM) and needed a
+  non-commercial Vietnamese aligner for word timestamps.
 
 ## Decision
 
-Use CrisperWhisper 2.0 through PyTorch, selecting the device at runtime (`mps` → `cuda` →
-`cpu`). Hide it behind a `Transcriber` interface so tests use a fake transcriber with captured
-transcripts. Spike LEARNING-205 will compare verbatim ASR models on Vietnamese stuttered clips;
-this ADR is accepted, amended or superseded based on its results.
+1. **ASR:** CrisperWhisper 2.0 **large**, `mode="verbatim"`, with word timestamps, through
+   PyTorch on the device chosen at runtime (`mps` → `cuda` → `cpu`). When the RAM pre-flight
+   fails (e.g. a 16 GB Mac under pressure), fall back to CrisperWhisper 2.0 **turbo**.
+2. **Cut candidates from two transcripts of the same model:** run CrisperWhisper in `verbatim`
+   and `intended` mode (`transcribe_dual` shares one encoder pass) and diff them. Words present
+   in verbatim but not in intended become filler / repeat / retake candidates, timed with the
+   verbatim word timestamps.
+3. **Acoustic backup:** voiced segments from a VAD that no transcript word covers become
+   candidates too (fillers and dropped repeats the model did not write).
+4. **Long pauses** come from the rule engine (word gaps and silence), not from the model.
+5. **Human review** before render stays the safety net; nothing is cut without approval.
+6. **Dropped:** PhoWhisper. faster-whisper stays only as a fast baseline in `eval/`, not in the
+   app.
+
+Keep all of this behind a `Transcriber` interface so tests use a fake transcriber with captured
+transcripts. Accuracy targets (recall, boundary error) are validated with labelled golden clips
+in LEARNING-206 / LEARNING-207; they do not block this decision.
 
 ## Consequences
 
-- Detection quality depends on the model keeping disfluencies in Vietnamese; this is the main
-  project risk until LEARNING-205 reports.
-- The model download and memory use must fit a 16 GB Mac; it loads only in the worker.
-- CrisperWhisper 2.0 weights (`nyralabs/CrisperWhisper2.0_*`) are under a non-commercial
-  research licence; commercial use needs a licence from Nyra Health (see
-  [the spike report](../spikes/2026-11-asr-models.md)).
-- The `Transcriber` interface keeps unit and integration tests fast and offline, and makes a
-  model swap a local change.
+- Each job runs the model once with two decoder prompts; detection logic must handle three
+  sources (diff, VAD gaps, pause rules) and merge overlapping candidates.
+- Memory: about 8 GB RAM for `large` on the dev machine. It must be measured on the 16 GB Mac
+  (MPS, fp16); the RAM pre-flight and the `turbo` fallback are required, not optional.
+- Vietnamese support of CrisperWhisper 2.0 is not confirmed by its model card; if the labelled
+  eval shows poor recall, revisit this ADR (the `Transcriber` interface keeps a swap local).
+- **Licence:** CrisperWhisper 2.0 weights are under the Nyra Health Non-Commercial Research
+  License. Accepted because StutterCut is personal / learning use; any commercial use needs a
+  licence from Nyra Health or a model swap.
+- The model loads only in the worker process.

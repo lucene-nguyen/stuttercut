@@ -1,6 +1,6 @@
 # Spike: verbatim ASR models on Vietnamese stuttered clips
 
-Date: 2026-11 · Jira: [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) · Time box: — · Status: **first full run done (5 clips, no labels yet); waiting for labels**
+Date: 2026-11 · Jira: [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) · Time box: — · Status: **decided** — CrisperWhisper 2.0 large verbatim + verbatim/intended diff + VAD + pause rules ([ADR 0002](../adr/0002-crisperwhisper-verbatim-asr.md))
 
 ## Question
 
@@ -51,15 +51,15 @@ spike. It does block any commercial use of CrisperWhisper without a licence from
 
 ## Results
 
-_Pending: the owner runs `run_spike.py` on the labelled clips and sends `summary.md`._
+Labelled accuracy (recall, boundary error) is not part of this spike: the clips are not labelled
+yet, and the decision below did not need it. It moves to LEARNING-206 / 207, using
+`eval.prelabel`, `eval.convert_audacity` and `eval.score_spike` built here.
 
-| Option | Recall overall | Filler-word recall | Halluc. fillers/min | Boundary ms | Pauses in gap | RTF | Peak RAM |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| crisperwhisper | | | | | | | |
-| whisper_baseline | | | | | | | |
-| phowhisper | | | | | | | |
-
-Raw report: `eval/reports/<date>/summary.md` (raw transcripts stay local).
+| Model | RTF (5 clips) | Peak RAM | Peak VRAM | Fillers written (total) | Repeats written (total) |
+| --- | --- | --- | --- | --- | --- |
+| CrisperWhisper 2.0 large, verbatim | 0.36–0.62 | 7.9 GB | 5.1 GB | 1 | 16 |
+| faster-whisper large-v3 | 0.11–0.24 | 3.1 GB | 4.5 GB | 1 | 8 |
+| PhoWhisper large + wav2vec2 CTC alignment | 0.63–1.43 | 9.3 GB | 6.5 GB | 5 | 13 |
 
 ### First full run, before labels (2026-11-14)
 
@@ -145,20 +145,42 @@ fp16 on CUDA. RAM = peak process RSS; VRAM = rise in GPU memory used (nvidia-smi
   the heaviest of the three. On a 16 GB Mac it must be measured before it can be chosen; if it
   is too heavy, attempt 2 (CTranslate2 + faster-whisper) is the next step.
 
+## Listening check (owner, c001)
+
+- faster-whisper large-v3 gives the most accurate Vietnamese text but **drops the stutters**: it
+  cleans fillers and repeats out of the transcript.
+- All three models write very few fillers even where they are audible, so transcript-only
+  detection is not enough; an acoustic signal is needed.
+
 ## Decision
 
-_Pending results._ Draft rule, to confirm or overturn with the data:
+Decided by the owner on 2026-11-14 (Jira comment on LEARNING-205); recorded as
+[ADR 0002](../adr/0002-crisperwhisper-verbatim-asr.md) (Accepted).
 
-- Choose the model with the best **filler-word recall** and **boundary error** that fits the
-  16 GB Mac at RTF < 1.
-- If CrisperWhisper 2.0 keeps Vietnamese fillers clearly better than PhoWhisper, accept
-  ADR 0002 and record the non-commercial licence. If PhoWhisper is close, prefer it
-  (Vietnamese-trained, permissive licence) and supersede ADR 0002.
+- **ASR:** CrisperWhisper 2.0 **large**, verbatim mode. It keeps the most content, including
+  repeats and false starts. On the Mac it runs on MPS; when the RAM pre-flight fails, fall back
+  to CrisperWhisper 2.0 **turbo**. Non-commercial licence accepted (personal / learning use).
+- **Cut detection:**
+  1. verbatim vs intended diff (same model, two modes) gives filler / repeat / retake
+     candidates with verbatim timestamps;
+  2. VAD voiced segments not covered by any word are a backup for what the model did not write;
+  3. the rule engine finds long pauses.
+- **Dropped:** PhoWhisper (slow, 9.3 GB RAM, non-commercial aligner needed for word times).
+  faster-whisper stays only as a fast baseline in `eval/`.
+- **Human review** before render stays the safety net.
+
+Why not wait for labels: the speed, memory and listening results already rule PhoWhisper out
+and show that no model alone writes the fillers; the hybrid design does not depend on which
+transcript wins. Accuracy targets are validated with labelled clips in LEARNING-206 / 207.
 
 ## Open questions / follow-ups
 
-- Does CrisperWhisper 2.0 `verbatim` mode keep Vietnamese fillers (ờ, ừm), or only English and
-  German ones?
-- Process RSS does not show all MPS memory; also check Activity Monitor on the Mac.
-- If timestamps are too loose, try CrisperWhisper `timing_method="forced_aligner"`
-  (English-only today) or a separate Vietnamese forced aligner.
+- Measure CrisperWhisper large and turbo on the 16 GB Mac (MPS, fp16): RAM, RTF, and whether
+  verbatim mode keeps Vietnamese fillers. Process RSS does not show all MPS memory; also check
+  Activity Monitor. (LEARNING-206)
+- Does `transcribe_dual` (verbatim + intended in one pass) work on the transformers backend and
+  on MPS? (LEARNING-206)
+- Risk: word timestamps may stretch over audio the model dropped and hide the VAD gaps; may need
+  tighter alignment. Measure with labels. (LEARNING-207)
+- Label the 5 clips (`eval.prelabel` + Audacity) and score recall and boundary error for the
+  diff + VAD + rules pipeline. (LEARNING-207)

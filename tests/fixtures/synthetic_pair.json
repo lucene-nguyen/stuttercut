@@ -1,0 +1,21 @@
+{
+  "_note": "Synthetic transcript written by hand for tests; not from a real recording.",
+  "verbatim": [
+    {"text": "ờ", "start": 0.10, "end": 0.30},
+    {"text": "tôi", "start": 0.40, "end": 0.60},
+    {"text": "tôi", "start": 0.65, "end": 0.85},
+    {"text": "sẽ", "start": 0.90, "end": 1.05},
+    {"text": "nói", "start": 1.10, "end": 1.30},
+    {"text": "về", "start": 1.35, "end": 1.50},
+    {"text": "âm", "start": 1.55, "end": 1.70},
+    {"text": "thanh", "start": 1.75, "end": 1.95}
+  ],
+  "intended": [
+    {"text": "tôi", "start": 0.65, "end": 0.85},
+    {"text": "sẽ", "start": 0.90, "end": 1.05},
+    {"text": "nói", "start": 1.10, "end": 1.30},
+    {"text": "về", "start": 1.35, "end": 1.50},
+    {"text": "âm", "start": 1.55, "end": 1.70},
+    {"text": "thanh", "start": 1.75, "end": 1.95}
+  ]
+}

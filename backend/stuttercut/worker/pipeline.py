@@ -35,9 +35,10 @@ def run_job(conn: sqlite3.Connection, cfg: Config, job_id: str, transcriber: Tra
                 repo.update_job(conn, job_id, duration_s=round(duration, 3))
             step = "transcribe"
             with span(conn, job_id, step):
-                pair = transcriber.transcribe_dual(wav)
+                pair = transcriber.transcribe(wav)
                 repo.replace_words(conn, job_id, "verbatim", pair.verbatim)
-                repo.replace_words(conn, job_id, "intended", pair.intended)
+                # Verbatim-only also clears intended words left by an earlier dual attempt.
+                repo.replace_words(conn, job_id, "intended", pair.intended or [])
         except Exception as e:
             error = f"{type(e).__name__}: {e}"
             extra: dict[str, object] = {"job_id": job_id, "step": step}

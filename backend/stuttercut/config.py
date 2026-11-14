@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stuttercut.asr import PASSES
+
 
 def read_dotenv(path: Path) -> dict[str, str]:
     """Minimal KEY=VALUE parser: ignores blanks and comments, strips matching quotes."""
@@ -31,11 +33,20 @@ class AsrConfig:
     model_size: str = "large"  # CrisperWhisper 2.0 size (ADR 0002)
     fallback_size: str = "turbo"  # used when free RAM < min_free_gb_large
     backend: str = "transformers"  # transformers (CPU/CUDA/MPS) or ct2 (CPU/CUDA, one-pass dual)
+    passes: str = "verbatim"  # verbatim, or dual = verbatim + intended (about 2x on transformers)
     language: str = "vi"
     device: str = "auto"  # auto = cuda -> mps -> cpu
     min_free_gb_large: float = 6.0
     min_free_gb_any: float = 3.0
     threads: int = 0  # torch CPU threads; 0 = library default
+
+    def __post_init__(self) -> None:
+        if self.passes not in PASSES:
+            raise ValueError(f"STUTTERCUT_ASR_PASSES must be one of {PASSES}, got {self.passes!r}")
+        if self.backend not in ("transformers", "ct2"):
+            raise ValueError(
+                f"STUTTERCUT_ASR_BACKEND must be transformers or ct2, got {self.backend!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,7 @@ _ENV: dict[str, tuple[str, str, type]] = {
     "STUTTERCUT_ASR_MODEL_SIZE": ("asr", "model_size", str),
     "STUTTERCUT_ASR_FALLBACK_SIZE": ("asr", "fallback_size", str),
     "STUTTERCUT_ASR_BACKEND": ("asr", "backend", str),
+    "STUTTERCUT_ASR_PASSES": ("asr", "passes", str),
     "STUTTERCUT_ASR_LANGUAGE": ("asr", "language", str),
     "STUTTERCUT_DEVICE": ("asr", "device", str),
     "STUTTERCUT_ASR_MIN_FREE_GB_LARGE": ("asr", "min_free_gb_large", float),

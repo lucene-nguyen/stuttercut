@@ -1,8 +1,9 @@
-"""CrisperWhisper 2.0 transcriber: verbatim + intended passes with word timestamps.
+"""CrisperWhisper 2.0 transcriber: verbatim pass, optional intended pass, word timestamps.
 
 Needs the ``asr`` extra (crisperwhisper, torch). The model loads once in __init__ and is reused.
-``transcribe_dual`` (both modes in one decoder pass) exists only on the ct2 backend, which has
-no MPS support; on the transformers backend (CPU/CUDA/MPS) the two modes run as two passes.
+``passes="dual"`` adds the intended transcript: on the ct2 backend (CPU/CUDA) both modes share
+one decoder pass (``transcribe_dual``); on transformers (CPU/CUDA/MPS) it is a second full pass,
+which roughly doubles transcribe time (lesson 002). Default is verbatim only.
 """
 
 from pathlib import Path
@@ -30,8 +31,7 @@ class CrisperWhisperTranscriber:
             torch.set_num_threads(cfg.threads)
         self.model_id = size if "/" in size else f"nyralabs/CrisperWhisper2.0_{size}"
         self.device = device
-        self._language = cfg.language
-        self._backend = cfg.backend
+        self._cfg = cfg
         self._model = CrisperWhisperModel(
             self.model_id,
             backend=cfg.backend,
@@ -39,19 +39,24 @@ class CrisperWhisperTranscriber:
             compute_type="float32" if device == "cpu" else "float16",
         )
 
-    def transcribe_dual(self, audio_path: Path) -> TranscriptPair:
-        if self._backend == "ct2":
+    def _pass(self, audio_path: Path, mode: str) -> Any:
+        return self._model.transcribe(
+            str(audio_path), language=self._cfg.language, mode=mode, word_timestamps=True
+        )
+
+    def transcribe(self, audio_path: Path) -> TranscriptPair:
+        if self._cfg.passes == "verbatim":
+            return TranscriptPair(
+                verbatim=_words(self._pass(audio_path, "verbatim")), intended=None
+            )
+        if self._cfg.backend == "ct2":
             verbatim, intended = self._model.transcribe_dual(
                 str(audio_path),
-                language=self._language,
+                language=self._cfg.language,
                 modes=("verbatim", "intended"),
                 word_timestamps=True,
             )
         else:
-            verbatim, intended = (
-                self._model.transcribe(
-                    str(audio_path), language=self._language, mode=mode, word_timestamps=True
-                )
-                for mode in ("verbatim", "intended")
-            )
+            verbatim = self._pass(audio_path, "verbatim")
+            intended = self._pass(audio_path, "intended")
         return TranscriptPair(verbatim=_words(verbatim), intended=_words(intended))

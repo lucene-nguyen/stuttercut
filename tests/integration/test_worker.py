@@ -78,10 +78,23 @@ def test_run_job_happy_path(
     assert job is not None
     assert job["status"] == "transcribed" and job["failed_step"] is None
     assert job["duration_s"] == pytest.approx(2.0, abs=0.1) and job["peak_rss_mb"] > 0
-    assert repo.word_counts(conn, job_id) == {"verbatim": 8, "intended": 6}
+    assert repo.word_counts(conn, job_id) == {"verbatim": 8, "intended": 0}  # verbatim only
     assert repo.get_words(conn, job_id, "verbatim")[0].text == "ờ"
     assert spans(conn, job_id) == [("extract_audio", "ok"), ("transcribe", "ok")]
     assert fake.calls == [paths.job_dir(cfg, job_id) / "audio.wav"]
+
+
+def test_run_job_dual_then_verbatim_retry(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    job_id = repo.create_job(conn, str(make_video()))
+
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE, passes="dual")) == "transcribed"
+    assert repo.word_counts(conn, job_id) == {"verbatim": 8, "intended": 6}
+
+    # A verbatim-only rerun must not leave the earlier intended words behind.
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE)) == "transcribed"
+    assert repo.word_counts(conn, job_id) == {"verbatim": 8, "intended": 0}
 
 
 def test_run_job_transcribe_failure(

@@ -24,6 +24,32 @@ def test_env_overrides_dotenv(tmp_path: Path) -> None:
     assert cfg.media.max_duration_s == 90.0
 
 
+def test_asr_passes_default_and_override() -> None:
+    assert load_config(env={}, dotenv=Path("missing.env")).asr.passes == "verbatim"
+    cfg = load_config(env={"STUTTERCUT_ASR_PASSES": "dual"}, dotenv=Path("missing.env"))
+    assert cfg.asr.passes == "dual"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"), [("STUTTERCUT_ASR_PASSES", "both"), ("STUTTERCUT_ASR_BACKEND", "onnx")]
+)
+def test_bad_choice_names_the_variable(name: str, value: str) -> None:
+    with pytest.raises(ValueError, match=name):
+        load_config(env={name: value}, dotenv=Path("missing.env"))
+
+
+def test_fake_transcriber_follows_passes(tmp_path: Path) -> None:
+    from stuttercut.asr.fake import FakeTranscriber
+    from tests.conftest import FIXTURES
+
+    fixture = FIXTURES / "synthetic_pair.json"
+    assert FakeTranscriber(fixture).transcribe(tmp_path / "a.wav").intended is None
+    dual = FakeTranscriber(fixture, passes="dual").transcribe(tmp_path / "a.wav")
+    assert dual.intended is not None and len(dual.intended) == 6
+    with pytest.raises(ValueError, match="passes"):
+        FakeTranscriber(fixture, passes="intended")
+
+
 def test_bad_number_names_the_variable() -> None:
     with pytest.raises(ValueError, match="STUTTERCUT_ASR_MIN_FREE_GB_ANY"):
         load_config(env={"STUTTERCUT_ASR_MIN_FREE_GB_ANY": "lots"}, dotenv=Path("missing.env"))

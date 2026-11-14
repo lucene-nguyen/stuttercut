@@ -42,7 +42,10 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.perf_counter()
         transcriber = load_transcriber(cfg)
         load_s = time.perf_counter() - t0
-        print(f"model {transcriber.model_id} on {transcriber.device}, loaded in {load_s:.1f} s")
+        print(
+            f"model {transcriber.model_id} on {transcriber.device}, passes {cfg.asr.passes}, "
+            f"loaded in {load_s:.1f} s"
+        )
         status = run_job(conn, cfg, job_id, transcriber)
 
     for s in repo.get_spans(conn, job_id):
@@ -57,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         f"duration {job['duration_s']} s, "
-        f"words verbatim {counts['verbatim']}, intended {counts['intended']}"
+        f"words verbatim {counts['verbatim']}, "
+        + (f"intended {counts['intended']}" if cfg.asr.passes == "dual" else "intended skipped")
     )
     print(
         f"peak RSS {rss.peak_mb} MB" + (f", peak VRAM {vram} MB (torch reserved)" if vram else "")

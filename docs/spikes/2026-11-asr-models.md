@@ -91,6 +91,11 @@ PhoWhisper is attempt 1 below (segments + CTC alignment).
 | | whisper_baseline | 9.1 | 3.9 | 0.12 | 3118 | 4466 | 100 | 0 | 0 |
 | | phowhisper | 13.2 | 21.0 | 0.67 | 9329 | 6506 | 100 | 0 | 0 |
 
+> **Correction (LEARNING-207, [lesson 003](../lessons/003-check-what-the-model-really-writes.md)):** the
+> "Fillers" column counted only ờ/à/ừm/ừ. CrisperWhisper writes Vietnamese hesitations as
+> `[UH]`/`[UM]`: 22 on c001 (19 + 3), not 1. Its filler count below is therefore far too low,
+> and "all three models write almost no fillers" does not hold for CrisperWhisper.
+
 What the counts suggest (to be checked against labels):
 
 - All three models write almost no filler words: 6 in total across ~11 minutes of speech,

@@ -52,3 +52,45 @@ def test_invalid_file_writes_nothing(tmp_path: Path) -> None:
 
     assert main([str(src), str(tmp_path / "labels")]) == 1
     assert not (tmp_path / "labels").exists()
+
+
+def test_rejects_unconfirmed_labels() -> None:
+    with pytest.raises(ValueError, match=r"unconfirmed label 'filler\?'"):
+        parse_labels("0.1\t0.2\tfiller?\n")
+
+
+def test_maps_original_video_names_via_index_and_skips_prelabels(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    src = data / "audacity"
+    src.mkdir(parents=True)
+    (data / "index.csv").write_text(
+        "clip_id,sha256,original_name\nc001,aa,c001.mp4\n3f2a9c1b,bb,Bài 1 ghi âm.mp4\n",
+        encoding="utf-8",
+    )
+    (src / "Bài 1 ghi âm.txt").write_text("0.5\t0.8\tfiller\n", encoding="utf-8")
+    (src / "c001.txt").write_text("1.0\t2.0\tpause\n", encoding="utf-8")
+    (src / "c001.prelabel.txt").write_text("1.0\t2.0\tfiller?\n", encoding="utf-8")
+
+    assert main([str(src), str(tmp_path / "labels")]) == 0
+    assert sorted(p.name for p in (tmp_path / "labels").iterdir()) == [
+        "3f2a9c1b.cuts.json",
+        "c001.cuts.json",
+    ]
+
+
+def test_unknown_label_name_with_index_is_rejected(tmp_path: Path) -> None:
+    src = tmp_path / "audacity"
+    src.mkdir()
+    (src / "mystery.txt").write_text("0.5\t0.8\tfiller\n", encoding="utf-8")
+    index = [{"clip_id": "c001", "sha256": "aa", "original_name": "c001.mp4"}]
+    with pytest.raises(ValueError, match=r"mystery.txt: no clip"):
+        convert_dir(src, tmp_path / "labels", index)
+
+
+def test_reports_errors_from_every_file(tmp_path: Path) -> None:
+    src = tmp_path / "audacity"
+    src.mkdir()
+    (src / "c001.txt").write_text("0.5\t0.8\tnoise\n", encoding="utf-8")
+    (src / "c002.txt").write_text("0.9\t0.8\tfiller\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"(?s)c001.txt.*c002.txt"):
+        convert_dir(src, tmp_path / "labels")

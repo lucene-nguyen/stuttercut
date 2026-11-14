@@ -1,15 +1,22 @@
 """Convert Audacity label exports to eval/labels/<clip_id>.cuts.json.
 
-Usage: python -m eval.convert_audacity <audacity_dir> <labels_dir>
+Usage: python -m eval.convert_audacity [<audacity_dir> <labels_dir>]
+(default: $STUTTERCUT_DATA_DIR/audacity -> eval/labels)
 
 Each line of an Audacity export is ``start<TAB>end<TAB>type``. Lines starting with a
-backslash are spectral-selection extras and are skipped.
+backslash are spectral-selection extras and are skipped. A label file may be named after the
+clip_id (c001.txt) or after the original video (as recorded in index.csv next to the audacity
+folder). Pre-labels (*.prelabel.txt) are skipped, and unconfirmed types ending in "?" are
+rejected: check each suggestion in Audacity and remove the "?".
 """
 
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
+from eval.env import data_dir
+from eval.ingest import read_index
 
 CUT_TYPES = ("filler", "repeat", "pause", "retake")
 
@@ -33,7 +40,9 @@ def parse_labels(text: str, source: str = "<labels>") -> list[dict[str, Any]]:
             errors.append(f"{source}:{n}: start/end are not numbers: {raw!r}")
             continue
         cut_type = parts[2].strip().lower()
-        if cut_type not in CUT_TYPES:
+        if cut_type.endswith("?"):
+            errors.append(f"{source}:{n}: unconfirmed label {parts[2]!r}: check it, remove the '?'")
+        elif cut_type not in CUT_TYPES:
             errors.append(f"{source}:{n}: type {parts[2]!r} not in {CUT_TYPES}")
         elif not 0 <= start < end:
             errors.append(f"{source}:{n}: need 0 <= start < end, got {start} .. {end}")
@@ -44,12 +53,35 @@ def parse_labels(text: str, source: str = "<labels>") -> list[dict[str, Any]]:
     return sorted(cuts, key=lambda c: (c["start"], c["end"]))
 
 
-def convert_dir(audacity_dir: Path, labels_dir: Path) -> list[Path]:
-    """Convert every *.txt in audacity_dir. Writes nothing if any file is invalid."""
-    files = sorted(audacity_dir.glob("*.txt"))
+def resolve_clip_id(stem: str, index: list[dict[str, str]]) -> str:
+    """Label file stem -> clip_id: a clip_id as is, or an original video name via index.csv."""
+    if not index or stem in {row["clip_id"] for row in index}:
+        return stem
+    for row in index:
+        if Path(row["original_name"]).stem == stem:
+            return row["clip_id"]
+    raise ValueError(f"{stem}.txt: no clip with this id or original file name in index.csv")
+
+
+def convert_dir(
+    audacity_dir: Path, labels_dir: Path, index: list[dict[str, str]] | None = None
+) -> list[Path]:
+    """Convert every label *.txt in audacity_dir. Writes nothing if any file is invalid."""
+    files = sorted(f for f in audacity_dir.glob("*.txt") if not f.name.endswith(".prelabel.txt"))
     if not files:
         raise ValueError(f"no *.txt label files in {audacity_dir}")
-    results = {f.stem: parse_labels(f.read_text(encoding="utf-8-sig"), f.name) for f in files}
+    results: dict[str, list[dict[str, Any]]] = {}
+    errors: list[str] = []
+    for f in files:
+        try:
+            clip_id = resolve_clip_id(f.stem, index or [])
+            if clip_id in results:
+                raise ValueError(f"{f.name}: a second label file for clip {clip_id}")
+            results[clip_id] = parse_labels(f.read_text(encoding="utf-8-sig"), f.name)
+        except ValueError as e:
+            errors.append(str(e))
+    if errors:
+        raise ValueError("\n".join(errors))
     labels_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for clip_id, cuts in results.items():
@@ -61,11 +93,15 @@ def convert_dir(audacity_dir: Path, labels_dir: Path) -> list[Path]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    if len(argv) == 2:
+        audacity_dir, labels_dir = Path(argv[0]), Path(argv[1])
+    elif not argv:
+        audacity_dir, labels_dir = data_dir() / "audacity", Path(__file__).parent / "labels"
+    else:
         print(__doc__, file=sys.stderr)
         return 2
     try:
-        written = convert_dir(Path(argv[0]), Path(argv[1]))
+        written = convert_dir(audacity_dir, labels_dir, read_index(audacity_dir.parent))
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1

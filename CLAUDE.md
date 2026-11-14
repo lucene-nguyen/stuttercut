@@ -39,8 +39,9 @@ Browser UI (React) talks only to the **API server** (FastAPI): REST + SSE progre
 ## Repository layout
 
 ```
+pyproject.toml           # tool config only (ruff, mypy, pytest) so they run from the repo root
 backend/
-  pyproject.toml
+  pyproject.toml         # the installable "stuttercut" package
   stuttercut/
     config.py            # all thresholds and settings (env + config file)
     platform.py          # device selection: mps -> cuda -> cpu
@@ -84,20 +85,25 @@ Keep to this layout. Propose changes before restructuring.
 # setup
 python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -e "backend[dev]"
-pre-commit install
+pre-commit install                                   # hooks use the active venv's ruff/mypy
+cp .env.example .env                                 # fill in LLM_API_KEY
 cd frontend && npm install
 
-# run
-uvicorn stuttercut.api.main:app --reload             # API + worker
-cd frontend && npm run dev                           # UI
+# run (from the repo root, venv active)
+uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
+cd frontend && npm run dev                           # UI on 127.0.0.1:5173, proxies /api
 
-# quality
+# quality (Python tool config lives in the root pyproject.toml)
 ruff check . && ruff format --check .
-mypy backend
-pytest                                               # unit + contract + integration (fake transcriber)
-pytest -m golden                                     # accuracy eval, loads the real model (slow)
-cd frontend && npm test && npx playwright test
+mypy backend                                         # strict on backend/stuttercut
+pytest                                               # all tests except golden (fake transcriber)
+pytest -m golden                                     # accuracy eval, real model (slow); exits 5 until golden tests exist
+pre-commit run --all-files
+cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
+cd frontend && npm run build
 ```
+
+Playwright e2e is not set up yet; add its command here when it lands.
 
 Update this section when commands change.
 

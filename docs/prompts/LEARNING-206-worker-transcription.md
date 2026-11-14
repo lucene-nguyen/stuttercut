@@ -33,4 +33,19 @@ Run lint, mypy, pytest. Then run the CLI once on $STUTTERCUT_DATA_DIR/clips/c001
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/3 (merged 2026-11-14).
+
+**Worked well**
+- Worker pipeline (extract_audio -> transcribe), SQLite schema + migrations, JSON Lines logs and spans landed in small commits; CI green on 3 OSes.
+- Fake transcriber + lavfi media made the worker tests fast and model-free; after review the FFmpeg tests run on CI on all 3 OSes (82 passed, 0 skipped).
+- c001 via the CLI on RTX 4060: 746 verbatim words, transcribe 78.8 s (verbatim) / 149.1 s (dual), peak RSS ~7.5–7.8 GB.
+
+**Had to be corrected or deviated from the prompt**
+- `transcribe_dual` is ct2-only (no MPS), so dual = two passes on transformers; the intended pass became optional, verbatim by default (review), ADR 0002 amended ([lesson 002](../lessons/002-crisperwhisper-dual-pass-is-ct2-only.md)).
+- CI runners had no ffmpeg, so 7 media tests silently skipped until review; now ffmpeg is installed and `STUTTERCUT_REQUIRE_FFMPEG=1` fails instead of skipping.
+- New JOB status `transcribed` (end state until detection, LEARNING-207).
+- A pre-commit mypy hook sees unstaged files only partly (stash): commit order had to keep each commit type-correct.
+
+**Next time**
+- Make expensive model passes opt-in from the start and measure them on the target device.
+- Make "skip if tool missing" tests fail in CI by design.

@@ -1,6 +1,7 @@
 """Score ASR spike transcripts against labelled cuts.
 
-Usage: python -m eval.score_spike <report_dir> [--labels eval/labels] [--tolerance 0.15]
+Usage: python -m eval.score_spike [<report_dir>] [--labels eval/labels] [--tolerance 0.15]
+(report_dir defaults to the newest eval/reports/<date> folder)
 
 Reads <report_dir>/<model>/<clip_id>.json (written by run_spike.py) and
 eval/labels/<clip_id>.cuts.json, then writes <report_dir>/summary.json and summary.md.
@@ -13,6 +14,8 @@ import unicodedata
 from pathlib import Path
 from statistics import mean
 from typing import Any
+
+from eval.env import newest_report
 
 FILLER_WORDS = frozenset(unicodedata.normalize("NFC", w) for w in ("ờ", "à", "ừm", "ừ"))
 CAPTURE_TYPES = ("filler", "repeat", "retake")
@@ -185,10 +188,11 @@ def to_markdown(summary: dict[str, Any]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("report_dir", type=Path)
+    parser.add_argument("report_dir", type=Path, nargs="?", help="default: newest report")
     parser.add_argument("--labels", type=Path, default=Path(__file__).parent / "labels")
     parser.add_argument("--tolerance", type=float, default=0.15, help="seconds (default 0.15)")
     args = parser.parse_args()
+    args.report_dir = args.report_dir or newest_report()
     summary = score_report(args.report_dir, args.labels, args.tolerance)
     if not summary["models"]:
         raise SystemExit(f"nothing to score in {args.report_dir} (no labelled clips?)")

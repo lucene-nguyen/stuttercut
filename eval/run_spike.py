@@ -1,9 +1,9 @@
 """Run the ASR spike: transcribe every manifest clip with every candidate model.
 
 Usage: python -m eval.run_spike [--models crisperwhisper whisper_baseline phowhisper]
-                                [--size whisper_baseline=turbo] [--device cpu] [--clips c001]
+                                [--size whisper_baseline=turbo] [--device auto] [--clips c001]
 
-Clips are read from $STUTTERCUT_DATA_DIR/clips/<clip_id>.* and never copied into the repo.
+Clips are read from $STUTTERCUT_DATA_DIR/clips (env or .env) and never copied into the repo.
 Writes eval/reports/<date>/<model>/<clip_id>.json (raw words, git-ignored) and run.json.
 Each model runs in its own process so its load time and peak RSS are measured alone.
 Only clip ids and timings are printed, never transcript text.
@@ -12,7 +12,6 @@ Only clip ids and timings are printed, never transcript text.
 import argparse
 import json
 import multiprocessing as mp
-import os
 import platform
 import subprocess
 import sys
@@ -26,10 +25,10 @@ from importlib import metadata
 from pathlib import Path
 
 from eval.asr_runners import RUNNER_NAMES, get_loader
+from eval.env import REPORTS, data_dir
+from eval.ingest import find_media
 from eval.manifest import load_manifest
 from stuttercut.platform import select_device
-
-REPORTS = Path(__file__).parent / "reports"
 
 
 def extract_audio(src: Path, dst: Path) -> float:
@@ -112,11 +111,12 @@ def run_model(
     sys.exit(1 if failed else 0)
 
 
-def find_clip(clips_dir: Path, clip_id: str) -> Path:
-    matches = sorted(p for p in clips_dir.glob(f"{clip_id}.*") if p.is_file())
-    if not matches:
-        raise FileNotFoundError(f"no media file for {clip_id} in {clips_dir}")
-    return matches[0]
+def device_name(device: str) -> str:
+    if device == "cuda":
+        import torch
+
+        return str(torch.cuda.get_device_name(0))
+    return platform.processor() or platform.machine()
 
 
 def _versions() -> dict[str, str]:
@@ -131,7 +131,7 @@ def _versions() -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=os.environ.get("STUTTERCUT_DATA_DIR"))
+    parser.add_argument("--data-dir", type=Path, help="default $STUTTERCUT_DATA_DIR (env or .env)")
     parser.add_argument("--models", nargs="+", choices=RUNNER_NAMES, default=list(RUNNER_NAMES))
     parser.add_argument(
         "--size",
@@ -140,25 +140,27 @@ def main() -> int:
         metavar="MODEL=SIZE",
         help="e.g. whisper_baseline=turbo, phowhisper=small, crisperwhisper=turbo",
     )
-    parser.add_argument("--device", choices=["cpu", "cuda", "mps"], default=None)
+    parser.add_argument(
+        "--device", choices=["auto", "cuda", "mps", "cpu"], default="auto", help="default auto"
+    )
     parser.add_argument("--manifest", type=Path, default=None, help="default eval/manifest.csv")
     parser.add_argument("--clips", nargs="+", help="subset of clip ids (default: all)")
     parser.add_argument("--out", type=Path, default=REPORTS / date.today().isoformat())
     args = parser.parse_args()
 
-    if args.data_dir is None:
-        parser.error("set STUTTERCUT_DATA_DIR or pass --data-dir")
+    root = data_dir(args.data_dir)
     sizes = dict(s.split("=", 1) for s in args.size)
     if unknown := set(sizes) - set(RUNNER_NAMES):
         parser.error(f"unknown model in --size: {sorted(unknown)}")
-    device = args.device or select_device()
+    device = select_device() if args.device == "auto" else args.device
+    print(f"device: {device} ({device_name(device)}){' [auto]' if args.device == 'auto' else ''}")
 
     clips = load_manifest(args.manifest) if args.manifest else load_manifest()
     if args.clips:
         clips = [c for c in clips if c["clip_id"] in set(args.clips)]
     if not clips:
         parser.error("no clips to run: fill eval/manifest.csv (or check --clips)")
-    sources = {c["clip_id"]: find_clip(args.data_dir / "clips", c["clip_id"]) for c in clips}
+    sources = {c["clip_id"]: find_media(root, c["clip_id"]) for c in clips}
 
     args.out.mkdir(parents=True, exist_ok=True)
     run_info = {
@@ -166,7 +168,9 @@ def main() -> int:
         "platform": platform.platform(),
         "processor": platform.processor(),
         "python": platform.python_version(),
-        "device_requested": device,
+        "device_requested": args.device,
+        "device": device,
+        "device_name": device_name(device),
         "models": {m: sizes.get(m, "default") for m in args.models},
         "clips": list(sources),
         "versions": _versions(),

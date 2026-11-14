@@ -1,8 +1,10 @@
 """Shared fixtures: config isolated in tmp_path, synthetic media made by FFmpeg (lavfi).
 
-Media tests skip cleanly when ffmpeg/ffprobe are not on PATH.
+Media tests skip cleanly when ffmpeg/ffprobe are not on PATH, unless
+STUTTERCUT_REQUIRE_FFMPEG=1 (set in CI), where a missing ffmpeg fails the run instead.
 """
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -14,7 +16,8 @@ from stuttercut.config import Config, load_config
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-needs_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg/ffprobe not on PATH")
+if os.environ.get("STUTTERCUT_REQUIRE_FFMPEG") == "1" and not HAS_FFMPEG:
+    raise RuntimeError("STUTTERCUT_REQUIRE_FFMPEG=1 but ffmpeg/ffprobe are not on PATH")
 
 
 @pytest.fixture

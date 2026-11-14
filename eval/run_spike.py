@@ -215,7 +215,12 @@ def main() -> int:
         "clips": list(sources),
         "versions": _versions(),
     }
-    (args.out / "run.json").write_text(json.dumps(run_info, indent=2) + "\n", encoding="utf-8")
+    run_file = args.out / "run.json"
+    if run_file.exists():  # a rerun of some models into the same report keeps the others
+        previous = json.loads(run_file.read_text(encoding="utf-8"))
+        run_info["models"] = {**previous.get("models", {}), **run_info["models"]}
+        run_info["clips"] = sorted({*previous.get("clips", []), *run_info["clips"]})
+    run_file.write_text(json.dumps(run_info, indent=2) + "\n", encoding="utf-8")
 
     ctx = mp.get_context("spawn")
     failures = []

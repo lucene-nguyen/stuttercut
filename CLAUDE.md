@@ -92,13 +92,14 @@ cd frontend && npm install
 # run (from the repo root, venv active)
 uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
 pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
-python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word counts, peak RAM (no text)
+python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word + cut counts, peak RAM (no text)
 cd frontend && npm run dev                           # UI on 127.0.0.1:5173, proxies /api
 
 # quality (Python tool config lives in the root pyproject.toml)
 ruff check . && ruff format --check .
 mypy backend                                         # strict on backend/stuttercut
 pytest                                               # all tests except golden (fake transcriber)
+pytest --cov=stuttercut.rules --cov-fail-under=80    # rule engine coverage gate (as in CI)
 pytest -m golden                                     # accuracy eval, real model (slow); exits 5 until golden tests exist
 pre-commit run --all-files
 
@@ -107,6 +108,7 @@ pip install -e "backend[dev,eval]"
 python -m eval.convert_audacity "$STUTTERCUT_DATA_DIR/audacity" eval/labels
 python -m eval.run_spike                             # needs STUTTERCUT_DATA_DIR + labelled clips
 python -m eval.score_spike eval/reports/<date>
+python -m eval.score_cuts                            # detector P/R/F1 vs eval/labels (needs a CLI run per clip)
 cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
 cd frontend && npm run build
 ```

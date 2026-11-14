@@ -5,7 +5,7 @@ Every variable is listed in .env.example.
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,6 +56,43 @@ class MediaConfig:
     ffmpeg_threads: int = 2
 
 
+def csv(raw: str) -> tuple[str, ...]:
+    """Comma-separated env value -> tuple of stripped, non-empty items."""
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+@dataclass(frozen=True)
+class RulesConfig:
+    """Cut detection thresholds (LEARNING-207). Token lists are matched after normalize()."""
+
+    # Hesitation words + CrisperWhisper's non-lexical tokens ([UH], [UM] on Vietnamese c001).
+    filler_tokens: tuple[str, ...] = (
+        "ờ", "ơ", "ừm", "ưm", "ờm", "ơm", "hm", "hmm", "uh", "um", "à", "ừ",
+    )  # fmt: skip
+    # Fillers that are also real words; cut only when isolated (see rules.detect).
+    ambiguous_fillers: tuple[str, ...] = ("à", "ừ")
+    ambiguous_isolation_ms: int = 200
+    pause_min_ms: int = 600
+    pause_keep_ms: int = 150
+    pause_voiced_max_ms: int = 100  # VAD speech inside a gap above this = not a pause
+    repeat_max_n: int = 3
+    # Vietnamese reduplications that are words, not stutters.
+    repeat_keep: tuple[str, ...] = (
+        "từ từ", "dần dần", "lâu lâu", "thường thường", "ngày ngày", "người người", "nhà nhà",
+    )  # fmt: skip
+    retake_window_s: float = 4.0
+    retake_min_words: int = 2
+    retake_min_hesitation_ms: int = 300  # filler or silence right before the restart
+    vad_min_ms: int = 150
+    vad_max_ms: int = 1200
+    vad_word_margin_ms: int = 80
+    # 0.8, not silero's 0.5: at 0.5 a noisy laptop mic made 153 of 161 s "speech" on c001 (tune
+    # split) and no pause survived the VAD check. Provisional until labelled clips (lesson 003).
+    vad_threshold: float = 0.8
+    merge_gap_ms: int = 50
+    min_cut_ms: int = 30
+
+
 @dataclass(frozen=True)
 class LogConfig:
     level: str = "INFO"
@@ -68,12 +105,13 @@ class Config:
     asr: AsrConfig = field(default_factory=AsrConfig)
     media: MediaConfig = field(default_factory=MediaConfig)
     log: LogConfig = field(default_factory=LogConfig)
+    rules: RulesConfig = field(default_factory=RulesConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
 
-# env var -> (section, field, type)
-_ENV: dict[str, tuple[str, str, type]] = {
+# env var -> (section, field, parser)
+_ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_ASR_MODEL_SIZE": ("asr", "model_size", str),
     "STUTTERCUT_ASR_FALLBACK_SIZE": ("asr", "fallback_size", str),
     "STUTTERCUT_ASR_BACKEND": ("asr", "backend", str),
@@ -88,26 +126,45 @@ _ENV: dict[str, tuple[str, str, type]] = {
     "STUTTERCUT_LOG_LEVEL": ("log", "level", str),
     "STUTTERCUT_LOG_MAX_BYTES": ("log", "max_bytes", int),
     "STUTTERCUT_LOG_BACKUP_COUNT": ("log", "backup_count", int),
+    "STUTTERCUT_FILLER_TOKENS": ("rules", "filler_tokens", csv),
+    "STUTTERCUT_AMBIGUOUS_FILLERS": ("rules", "ambiguous_fillers", csv),
+    "STUTTERCUT_AMBIGUOUS_ISOLATION_MS": ("rules", "ambiguous_isolation_ms", int),
+    "STUTTERCUT_PAUSE_MIN_MS": ("rules", "pause_min_ms", int),
+    "STUTTERCUT_PAUSE_KEEP_MS": ("rules", "pause_keep_ms", int),
+    "STUTTERCUT_PAUSE_VOICED_MAX_MS": ("rules", "pause_voiced_max_ms", int),
+    "STUTTERCUT_REPEAT_MAX_N": ("rules", "repeat_max_n", int),
+    "STUTTERCUT_REPEAT_KEEP": ("rules", "repeat_keep", csv),
+    "STUTTERCUT_RETAKE_WINDOW_S": ("rules", "retake_window_s", float),
+    "STUTTERCUT_RETAKE_MIN_WORDS": ("rules", "retake_min_words", int),
+    "STUTTERCUT_RETAKE_MIN_HESITATION_MS": ("rules", "retake_min_hesitation_ms", int),
+    "STUTTERCUT_VAD_MIN_MS": ("rules", "vad_min_ms", int),
+    "STUTTERCUT_VAD_MAX_MS": ("rules", "vad_max_ms", int),
+    "STUTTERCUT_VAD_WORD_MARGIN_MS": ("rules", "vad_word_margin_ms", int),
+    "STUTTERCUT_VAD_THRESHOLD": ("rules", "vad_threshold", float),
+    "STUTTERCUT_MERGE_GAP_MS": ("rules", "merge_gap_ms", int),
+    "STUTTERCUT_MIN_CUT_MS": ("rules", "min_cut_ms", int),
 }
 
 
 def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env")) -> Config:
     """Defaults, then .env, then the environment (or ``env`` when given, for tests)."""
     values = {**read_dotenv(dotenv), **(os.environ if env is None else env)}
-    sections: dict[str, dict[str, object]] = {"asr": {}, "media": {}, "log": {}}
+    sections: dict[str, dict[str, object]] = {"asr": {}, "media": {}, "log": {}, "rules": {}}
     for name, (section, key, cast) in _ENV.items():
         raw = values.get(name)
         if raw:
             try:
                 sections[section][key] = cast(raw)
             except ValueError as e:
-                raise ValueError(f"{name}={raw!r} is not a valid {cast.__name__}") from e
+                kind = getattr(cast, "__name__", "value")
+                raise ValueError(f"{name}={raw!r} is not a valid {kind}") from e
     home = values.get("STUTTERCUT_HOME")
     nice = values.get("STUTTERCUT_WORKER_NICE")
     return Config(
         asr=AsrConfig(**sections["asr"]),  # type: ignore[arg-type]
         media=MediaConfig(**sections["media"]),  # type: ignore[arg-type]
         log=LogConfig(**sections["log"]),  # type: ignore[arg-type]
+        rules=RulesConfig(**sections["rules"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
         worker_nice=int(nice) if nice else 10,
     )

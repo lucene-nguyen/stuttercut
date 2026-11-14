@@ -10,22 +10,23 @@ Only metrics are written; no transcript text.
 
 import argparse
 import json
-import unicodedata
 from pathlib import Path
 from statistics import mean
 from typing import Any
 
 from eval.env import newest_report
+from stuttercut.config import RulesConfig
+from stuttercut.rules import normalize as _normalize
 
-FILLER_WORDS = frozenset(unicodedata.normalize("NFC", w) for w in ("ờ", "à", "ừm", "ừ"))
+# Same list as the app's detector, incl. CrisperWhisper's "[UH]"/"[UM]" (lesson 003).
+FILLER_WORDS = frozenset(_normalize(t) for t in RulesConfig().filler_tokens)
 CAPTURE_TYPES = ("filler", "repeat", "retake")
 BOUNDARY_TYPES = ("filler", "repeat")
 
 
 def normalize(word: str) -> str:
-    """NFC, lower case, punctuation stripped (so "Ừm," == "ừm")."""
-    w = unicodedata.normalize("NFC", word).lower()
-    return "".join(ch for ch in w if ch.isalnum())
+    """NFC, lower case, punctuation stripped (so "Ừm," == "ừm", "[UH]" == "uh")."""
+    return _normalize(word)
 
 
 def is_filler(word: str) -> bool:
@@ -165,7 +166,8 @@ def to_markdown(summary: dict[str, Any]) -> str:
         "# ASR spike summary",
         "",
         f"Tolerance ±{summary['tolerance_s'] * 1000:.0f} ms. Recall = labelled cut has an "
-        "overlapping word. Filler-word recall = a filler word (ờ, à, ừm, ừ) overlaps it.",
+        "overlapping word. Filler-word recall = a filler word (ờ, ừm, [UH], [UM], ...) "
+        "overlaps it.",
         "",
         "| Model | Clips | Audio min | Recall filler | Recall repeat | Recall retake | "
         "Recall overall | Filler-word recall | Halluc. fillers/min | Boundary ms "
@@ -209,7 +211,8 @@ def runs_markdown(report_dir: Path) -> str:
     lines = [
         "# ASR spike runs",
         "",
-        "Fillers = words ờ, à, ừm, ừ. Repeats = earlier copies of immediate repeats. "
+        "Fillers = filler words (ờ, ừm, [UH], [UM], ...). "
+        "Repeats = earlier copies of immediate repeats. "
         "Transcribe = wall time without model load. VRAM = rise in GPU memory used "
         "(nvidia-smi), CUDA only.",
     ]

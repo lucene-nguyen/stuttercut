@@ -1,7 +1,8 @@
 """Manual run: python -m stuttercut.worker.cli <video>
 
-Creates a job, loads the real transcriber and runs the pipeline in this process. Prints the job
-id, device, step timings, word counts per variant and peak RSS/VRAM; never transcript text.
+Creates a job, loads the real transcriber and VAD and runs the pipeline in this process. Prints
+the job id, device, step timings, word counts, cut counts per reason and source, and peak
+RSS/VRAM; never transcript text.
 """
 
 import argparse
@@ -14,7 +15,7 @@ from stuttercut.observability.logging import setup_logging
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.storage import paths, repo
 from stuttercut.storage.db import connect
-from stuttercut.worker.main import load_transcriber
+from stuttercut.worker.main import load_transcriber, load_vad
 from stuttercut.worker.pipeline import run_job
 
 
@@ -46,7 +47,8 @@ def main(argv: list[str] | None = None) -> int:
             f"model {transcriber.model_id} on {transcriber.device}, passes {cfg.asr.passes}, "
             f"loaded in {load_s:.1f} s"
         )
-        status = run_job(conn, cfg, job_id, transcriber)
+        vad = load_vad(cfg)
+        status = run_job(conn, cfg, job_id, transcriber, vad)
 
     for s in repo.get_spans(conn, job_id):
         print(f"  {s['step']:<14} {s['duration_s']:>7.2f} s  {s['status']}")
@@ -66,9 +68,14 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"peak RSS {rss.peak_mb} MB" + (f", peak VRAM {vram} MB (torch reserved)" if vram else "")
     )
+    for by in ("reason", "source"):
+        by_count = repo.cut_counts(conn, job_id, by)
+        listed = ", ".join(f"{k} {n}" for k, n in sorted(by_count.items())) or "none"
+        print(f"cuts by {by}: {listed} (total {sum(by_count.values())})")
+    print(f"vad {'silero' if vad else 'off'}")
     print(f"db {paths.db_path(cfg)}\nlog {log_file}")
     conn.close()
-    return 0 if status == "transcribed" else 1
+    return 0 if status == "ready_for_review" else 1
 
 
 if __name__ == "__main__":

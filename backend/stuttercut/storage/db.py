@@ -41,6 +41,20 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX span_job ON span(job_id);
     """,
+    # 2: cut (design doc "Data model" + confidence; LEARNING-207)
+    """
+    CREATE TABLE cut (
+        id          INTEGER PRIMARY KEY,
+        job_id      TEXT NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+        start_s     REAL NOT NULL,
+        end_s       REAL NOT NULL CHECK (end_s > start_s),
+        reason      TEXT NOT NULL CHECK (reason IN ('filler', 'repeat', 'pause', 'retake')),
+        source      TEXT NOT NULL CHECK (source IN ('rules', 'vad', 'diff', 'llm')),
+        confidence  REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+        kept        INTEGER NOT NULL DEFAULT 0 CHECK (kept IN (0, 1))
+    );
+    CREATE INDEX cut_job ON cut(job_id);
+    """,
 ]
 
 

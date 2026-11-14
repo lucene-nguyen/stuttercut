@@ -68,3 +68,42 @@ def test_replace_words_is_retry_safe(conn: sqlite3.Connection) -> None:
     repo.replace_words(conn, job_id, "intended", first[1:])
     assert repo.get_words(conn, job_id, "verbatim") == first[1:]
     assert repo.word_counts(conn, job_id) == {"verbatim": 1, "intended": 1}
+
+
+def test_migration_2_adds_cut_table(conn: sqlite3.Connection) -> None:
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(cut)")}
+    assert columns == {"id", "job_id", "start_s", "end_s", "reason", "source", "confidence", "kept"}
+
+
+def test_migrate_from_version_1_keeps_jobs(tmp_path: Path) -> None:
+    raw = sqlite3.connect(tmp_path / "old.db")
+    raw.executescript(MIGRATIONS[0] + "\nPRAGMA user_version = 1;")
+    raw.execute("INSERT INTO job (id, source_path) VALUES ('old1', 'a.mp4')")
+    raw.commit()
+    raw.close()
+
+    conn = connect(tmp_path / "old.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
+    assert repo.get_job(conn, "old1") is not None
+    assert repo.get_cuts(conn, "old1") == []
+
+
+def test_replace_cuts_keeps_user_restored_ones(conn: sqlite3.Connection) -> None:
+    from stuttercut.rules import Cut
+
+    job_id = repo.create_job(conn, "a.mp4")
+    first = [Cut(0.0, 0.3, "filler", "rules", 0.9), Cut(1.0, 2.0, "pause", "rules", 0.6)]
+    assert repo.replace_cuts(conn, job_id, first) == 2
+    restored = repo.get_cuts(conn, job_id)[1]
+    repo.set_cut_kept(conn, restored["id"], True)
+
+    again = [Cut(0.0, 0.3, "filler", "rules", 0.9), Cut(1.1, 1.9, "pause", "vad", 0.9)]
+    assert repo.replace_cuts(conn, job_id, again) == 1  # the pause overlaps the kept one
+    rows = repo.get_cuts(conn, job_id)
+    assert [(r["reason"], r["kept"]) for r in rows] == [("filler", 0), ("pause", 1)]
+    assert repo.cut_counts(conn, job_id, "reason") == {"filler": 1}  # kept ones not counted
+    assert repo.cut_counts(conn, job_id, "source") == {"rules": 1}
+    with pytest.raises(ValueError, match="by must be"):
+        repo.cut_counts(conn, job_id, "kept")
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.replace_cuts(conn, job_id, [Cut(1.0, 1.0, "filler", "rules", 0.5)])

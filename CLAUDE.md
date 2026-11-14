@@ -118,6 +118,7 @@ Update this section when commands change.
 7. Use `.github/pull_request_template.md` for the PR and go through `docs/checklists/pr-review.md`.
 8. If a task hits a surprising bug, a wrong assumption or a non-obvious fix, propose a lesson in `docs/lessons/` (from `TEMPLATE.md`) in the same PR.
 9. Spikes write their report to `docs/spikes/` (from `TEMPLATE.md`) and end with a decision or ADR.
+10. After pushing a branch, open the PR with `gh pr create` using the template, then watch CI with `gh pr checks --watch` and fix failures until green. Never merge; the owner merges.
 
 ## Rules you must follow
 

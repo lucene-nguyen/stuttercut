@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 
 from stuttercut.asr import Word
+from stuttercut.rules import Cut
 
 VARIANTS = ("verbatim", "intended")
 
@@ -98,3 +99,50 @@ def insert_span(
 
 def get_spans(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM span WHERE job_id = ? ORDER BY id", (job_id,)))
+
+
+def replace_cuts(conn: sqlite3.Connection, job_id: str, cuts: list[Cut]) -> int:
+    """Replace the job's detected cuts; cuts the user kept (kept=1) are never touched.
+
+    A new cut that overlaps a kept one by more than half of itself is skipped, so a re-run
+    does not suggest again what the user already restored. Returns how many were stored.
+    """
+    with conn:
+        conn.execute("DELETE FROM cut WHERE job_id = ? AND kept = 0", (job_id,))
+        kept = conn.execute(
+            "SELECT start_s, end_s FROM cut WHERE job_id = ? AND kept = 1", (job_id,)
+        ).fetchall()
+        fresh = [
+            c
+            for c in cuts
+            if not any(
+                min(c.end, k["end_s"]) - max(c.start, k["start_s"]) > (c.end - c.start) / 2
+                for k in kept
+            )
+        ]
+        conn.executemany(
+            "INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [(job_id, c.start, c.end, c.reason, c.source, c.confidence) for c in fresh],
+        )
+    return len(fresh)
+
+
+def get_cuts(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
+    return list(conn.execute("SELECT * FROM cut WHERE job_id = ? ORDER BY start_s", (job_id,)))
+
+
+def set_cut_kept(conn: sqlite3.Connection, cut_id: int, kept: bool) -> None:
+    with conn:
+        conn.execute("UPDATE cut SET kept = ? WHERE id = ?", (int(kept), cut_id))
+
+
+def cut_counts(conn: sqlite3.Connection, job_id: str, by: str) -> dict[str, int]:
+    """Active (not kept) cuts per ``reason`` or per ``source``."""
+    if by not in ("reason", "source"):
+        raise ValueError(f"by must be reason or source, got {by!r}")
+    rows = conn.execute(
+        f"SELECT {by} AS k, COUNT(*) AS n FROM cut WHERE job_id = ? AND kept = 0 GROUP BY {by}",
+        (job_id,),
+    )
+    return {r["k"]: r["n"] for r in rows}

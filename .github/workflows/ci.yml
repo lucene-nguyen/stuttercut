@@ -39,7 +39,7 @@ jobs:
       - name: Type check
         run: mypy backend
       - name: Tests
-        run: pytest -rs
+        run: pytest -rs --cov=stuttercut.rules --cov-fail-under=80 --cov-report=term
         env:
           STUTTERCUT_REQUIRE_FFMPEG: "1" # media tests must run here, not skip
 

@@ -74,3 +74,15 @@ def test_preflight_fails_below_minimum() -> None:
 
 def test_preflight_keeps_turbo_when_configured() -> None:
     assert preflight_model_size(AsrConfig(model_size="turbo"), free_gb=4.0) == "turbo"
+
+
+def test_rules_thresholds_from_env() -> None:
+    env = {
+        "STUTTERCUT_PAUSE_MIN_MS": "800",
+        "STUTTERCUT_FILLER_TOKENS": " ờ, [UH] ,,ừm ",
+        "STUTTERCUT_REPEAT_KEEP": "từ từ,dần dần",
+    }
+    rules = load_config(env=env, dotenv=Path("missing.env")).rules
+    assert rules.pause_min_ms == 800 and rules.pause_keep_ms == 150
+    assert rules.filler_tokens == ("ờ", "[UH]", "ừm")
+    assert rules.repeat_keep == ("từ từ", "dần dần")

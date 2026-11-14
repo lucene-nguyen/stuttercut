@@ -11,6 +11,7 @@ from typing import Protocol
 
 from stuttercut.asr import Transcriber
 from stuttercut.config import Config, load_config
+from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.logging import setup_logging
 from stuttercut.platform import preflight_model_size, select_device
 from stuttercut.storage import paths, repo
@@ -34,6 +35,17 @@ def load_transcriber(cfg: Config) -> Transcriber:
     return CrisperWhisperTranscriber(size, device, cfg.asr)
 
 
+def load_vad(cfg: Config) -> VoiceDetector | None:
+    """silero-vad if installed; otherwise detection runs on words only (WARN logged)."""
+    try:
+        from stuttercut.media.vad import SileroVad
+
+        return SileroVad(cfg.rules)
+    except ImportError:
+        log.warning("silero-vad not installed: VAD-based cuts and pause checks are off")
+        return None
+
+
 def lower_priority(nice: int) -> None:
     """Keep the machine usable during a job (design: worker os.nice(10))."""
     if nice <= 0:
@@ -53,6 +65,7 @@ def worker_main(
     job_queue: JobQueue,
     cfg: Config | None = None,
     make_transcriber: Callable[[Config], Transcriber] = load_transcriber,
+    make_vad: Callable[[Config], VoiceDetector | None] = load_vad,
 ) -> None:
     cfg = cfg or load_config()
     setup_logging(paths.log_dir(cfg), cfg.log)
@@ -61,14 +74,15 @@ def worker_main(
     try:
         transcriber: Transcriber | None = make_transcriber(cfg)
         load_error = ""
+        vad = make_vad(cfg)
     except Exception as e:  # e.g. InsufficientMemoryError: fail jobs clearly, keep serving
         log.error("ASR model failed to load", exc_info=True)
-        transcriber, load_error = None, f"{type(e).__name__}: {e}"
+        transcriber, load_error, vad = None, f"{type(e).__name__}: {e}", None
     try:
         while (job_id := job_queue.get()) is not None:
             if transcriber is None:
                 repo.set_status(conn, job_id, "failed", failed_step="load_model", error=load_error)
                 continue
-            run_job(conn, cfg, job_id, transcriber)
+            run_job(conn, cfg, job_id, transcriber, vad)
     finally:
         conn.close()

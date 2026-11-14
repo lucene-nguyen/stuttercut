@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Model caches
+.cache/
+models/
+*.pt
+*.safetensors
+*.ckpt
+*.bin
+
+# Media outputs and private clips (never commit real voices)
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.m4a
+*.mp3
+eval/clips/
+media_out/
+outputs/
+
+# Tools / OS / editors
+.qodo/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,6 @@
+# LF everywhere so ruff/prettier/hooks agree on Windows and macOS.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.wav binary

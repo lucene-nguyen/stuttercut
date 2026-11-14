@@ -27,10 +27,11 @@ The spike (5 clips, about 11 minutes of speech, no labels yet) showed:
 1. **ASR:** CrisperWhisper 2.0 **large**, `mode="verbatim"`, with word timestamps, through
    PyTorch on the device chosen at runtime (`mps` → `cuda` → `cpu`). When the RAM pre-flight
    fails (e.g. a 16 GB Mac under pressure), fall back to CrisperWhisper 2.0 **turbo**.
-2. **Cut candidates from two transcripts of the same model:** run CrisperWhisper in `verbatim`
-   and `intended` mode (`transcribe_dual` shares one encoder pass) and diff them. Words present
-   in verbatim but not in intended become filler / repeat / retake candidates, timed with the
-   verbatim word timestamps.
+2. **Cut candidates from two transcripts of the same model (optional pass):** with
+   `STUTTERCUT_ASR_PASSES=dual`, also run CrisperWhisper in `intended` mode and diff it with
+   `verbatim`. Words present in verbatim but not in intended become filler / repeat / retake
+   candidates, timed with the verbatim word timestamps. The default is `verbatim` only (one
+   pass); see Consequences. *(Amended in LEARNING-206.)*
 3. **Acoustic backup:** voiced segments from a VAD that no transcript word covers become
    candidates too (fillers and dropped repeats the model did not write).
 4. **Long pauses** come from the rule engine (word gaps and silence), not from the model.
@@ -44,8 +45,15 @@ in LEARNING-206 / LEARNING-207; they do not block this decision.
 
 ## Consequences
 
-- Each job runs the model once with two decoder prompts; detection logic must handle three
-  sources (diff, VAD gaps, pause rules) and merge overlapping candidates.
+- **The intended pass is optional and off by default.** CrisperWhisper's one-pass
+  `transcribe_dual` exists only on the ct2 backend, which has no MPS support, so on the
+  transformers backend (the Mac default) `dual` is a second full pass. Measured on c001
+  (161 s, RTX 4060, `large`): transcribe 78.8 s verbatim only vs 149.1 s dual — see
+  [lesson 002](../lessons/002-crisperwhisper-dual-pass-is-ct2-only.md). `STUTTERCUT_ASR_PASSES`
+  = `verbatim` (default) | `dual`; `TranscriptPair.intended` is `None` in verbatim mode.
+- Detection (LEARNING-207) must work from verbatim words + VAD gaps + pause rules alone, and use
+  the verbatim-vs-intended diff only when `dual` ran; it merges overlapping candidates from all
+  sources. Whether `dual` is worth its cost is measured with labelled clips in LEARNING-207.
 - Memory: about 8 GB RAM for `large` on the dev machine. It must be measured on the 16 GB Mac
   (MPS, fp16); the RAM pre-flight and the `turbo` fallback are required, not optional.
 - Vietnamese support of CrisperWhisper 2.0 is not confirmed by its model card; if the labelled

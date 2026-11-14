@@ -17,21 +17,24 @@ transcripts. The worker needs both for every job, on the Mac (MPS) and on Window
 ## What I learned
 - Read the library's source for the exact backend/device matrix before designing around a
   feature; the model card only says "dual" exists.
-- The `Transcriber` interface hides it: `CrisperWhisperTranscriber.transcribe_dual` calls the
-  library's `transcribe_dual` on `STUTTERCUT_ASR_BACKEND=ct2` and two `transcribe` passes on
-  `transformers` (default, works on MPS).
+- Make the expensive pass optional instead of paying for it on every job. After review the
+  intended pass became a setting: `STUTTERCUT_ASR_PASSES` = `verbatim` (default) | `dual`.
+  `Transcriber.transcribe` returns `intended=None` in verbatim mode; with `dual` it uses the
+  library's `transcribe_dual` on `STUTTERCUT_ASR_BACKEND=ct2` and two passes on `transformers`.
+  ADR 0002 is amended to match.
 
 ## Evidence
-```text
-$ python -m stuttercut.worker.cli c001.mp4
-model nyralabs/CrisperWhisper2.0_large on cuda, loaded in 14.1 s
-  extract_audio     0.26 s  ok
-  transcribe      149.06 s  ok
-words verbatim 746, intended 675
-peak RSS 7809 MB, peak VRAM 7180 MB (torch reserved)
-```
+c001 (161 s), RTX 4060 Laptop 8 GB, CUDA, CrisperWhisper 2.0 `large`, fp16, transformers backend,
+`python -m stuttercut.worker.cli c001.mp4`:
+
+| Passes | Load s | Transcribe s | RTF | Peak RSS MB | Peak VRAM MB (torch reserved) | Words verbatim / intended |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `dual` (two passes) | 14.1 | 149.1 | 0.93 | 7809 | 7180 | 746 / 675 |
+| `verbatim` (default) | 12.5 | 78.8 | 0.49 | 7523 | 7180 | 746 / skipped |
+
+Torch keeps its CUDA cache, so reserved VRAM peaks the same in both modes.
 
 ## Next time
-Measure the full step on the target device before fixing a timeout. Open for LEARNING-235: the
-3 min transcribe timeout leaves little room for two passes on MPS; measure on the Mac, then
-either raise the timeout, use `turbo` for the intended pass, or run ct2 on CPU for `dual`.
+Measure the full step on the target device before fixing a timeout. Open for LEARNING-207:
+does the intended diff find cuts that verbatim words + VAD + rules miss? If not, leave `dual`
+off. Open for LEARNING-235: measure both modes on the Mac (MPS) against the 3 min timeout.

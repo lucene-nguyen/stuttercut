@@ -18,8 +18,8 @@ strict = true
 files = ["backend/stuttercut"]
 
 [[tool.mypy.overrides]]
-# torch is optional (the "eval" extra) and absent in CI.
-module = ["torch", "torch.*"]
+# torch and crisperwhisper are optional (the "asr"/"eval" extras) and absent in CI.
+module = ["torch", "torch.*", "crisperwhisper", "crisperwhisper.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

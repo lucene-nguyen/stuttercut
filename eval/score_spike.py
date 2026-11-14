@@ -28,6 +28,16 @@ def normalize(word: str) -> str:
     return "".join(ch for ch in w if ch.isalnum())
 
 
+def is_filler(word: str) -> bool:
+    return normalize(word) in FILLER_WORDS
+
+
+def repeat_indices(words: list[dict[str, Any]]) -> set[int]:
+    """Indices of earlier copies in immediate repeats ("tôi tôi sẽ" -> {0}); keeps the last."""
+    norm = [normalize(w["word"]) for w in words]
+    return {i for i in range(len(norm) - 1) if norm[i] and norm[i] == norm[i + 1]}
+
+
 def overlaps(word: dict[str, Any], start: float, end: float, tol: float = 0.0) -> bool:
     return bool(word["start"] < end + tol and word["end"] > start - tol)
 

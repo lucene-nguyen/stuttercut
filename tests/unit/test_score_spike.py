@@ -105,3 +105,14 @@ def test_score_report_end_to_end(tmp_path: Path) -> None:
     md = to_markdown(summary)
     assert "| whisper_baseline | 1 |" in md
     assert "Tôi" not in md  # metrics only, never transcript text
+
+
+def test_write_summary_skips_when_nothing_is_labelled(tmp_path: Path) -> None:
+    from eval.score_spike import write_summary
+
+    (tmp_path / "phowhisper").mkdir()
+    result = {"clip_id": "c001", "audio_s": 60.0, "wall_s": 6.0, "peak_rss_mb": 1.0, "words": []}
+    (tmp_path / "phowhisper" / "c001.json").write_text(json.dumps(result), "utf-8")
+
+    assert write_summary(tmp_path, tmp_path / "no-labels")["models"] == {}
+    assert not (tmp_path / "summary.md").exists()

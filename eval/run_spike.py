@@ -28,6 +28,7 @@ from eval.asr_runners import RUNNER_NAMES, get_loader
 from eval.env import REPORTS, data_dir
 from eval.ingest import find_media
 from eval.manifest import load_manifest
+from eval.score_spike import write_summary
 from stuttercut.platform import select_device
 
 
@@ -194,7 +195,11 @@ def main() -> int:
                 failures.append(name)
 
     print(f"done: {args.out}" + (f" (failures: {', '.join(failures)})" if failures else ""))
-    print(f"next: python -m eval.score_spike {args.out}")
+    summary = write_summary(args.out)  # clips without eval/labels/<clip_id>.cuts.json are skipped
+    if summary["models"]:
+        print(f"scored: {args.out / 'summary.md'}")
+    else:
+        print("no labelled clips yet: scoring skipped (python -m eval.compare_html to review)")
     return 1 if failures else 0
 
 

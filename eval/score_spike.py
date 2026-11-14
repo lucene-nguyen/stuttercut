@@ -186,19 +186,28 @@ def to_markdown(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+LABELS = Path(__file__).parent / "labels"
+
+
+def write_summary(report_dir: Path, labels_dir: Path = LABELS, tol: float = 0.15) -> dict[str, Any]:
+    """Score and write summary.md/json; writes nothing when no clip has labels yet."""
+    summary = score_report(report_dir, labels_dir, tol)
+    if summary["models"]:
+        (report_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", "utf-8")
+        (report_dir / "summary.md").write_text(to_markdown(summary), "utf-8")
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("report_dir", type=Path, nargs="?", help="default: newest report")
-    parser.add_argument("--labels", type=Path, default=Path(__file__).parent / "labels")
+    parser.add_argument("--labels", type=Path, default=LABELS)
     parser.add_argument("--tolerance", type=float, default=0.15, help="seconds (default 0.15)")
     args = parser.parse_args()
-    args.report_dir = args.report_dir or newest_report()
-    summary = score_report(args.report_dir, args.labels, args.tolerance)
-    if not summary["models"]:
-        raise SystemExit(f"nothing to score in {args.report_dir} (no labelled clips?)")
-    (args.report_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", "utf-8")
-    (args.report_dir / "summary.md").write_text(to_markdown(summary), "utf-8")
-    print(f"wrote {args.report_dir / 'summary.md'} and summary.json")
+    report_dir = args.report_dir or newest_report()
+    if not write_summary(report_dir, args.labels, args.tolerance)["models"]:
+        raise SystemExit(f"nothing to score in {report_dir} (no labelled clips?)")
+    print(f"wrote {report_dir / 'summary.md'} and summary.json")
 
 
 if __name__ == "__main__":

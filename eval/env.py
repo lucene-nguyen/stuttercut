@@ -3,24 +3,10 @@
 import os
 from pathlib import Path
 
+from stuttercut.config import read_dotenv
+
 REPO = Path(__file__).resolve().parent.parent
 REPORTS = Path(__file__).parent / "reports"
-
-
-def read_dotenv(path: Path = REPO / ".env") -> dict[str, str]:
-    """Minimal KEY=VALUE parser: ignores blanks and comments, strips matching quotes."""
-    if not path.exists():
-        return {}
-    values = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key.removeprefix("export ").strip()] = value
-    return values
 
 
 def get_setting(name: str, dotenv: Path = REPO / ".env") -> str | None:

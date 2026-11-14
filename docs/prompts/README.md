@@ -10,4 +10,5 @@ Prompts given to Claude Code for each Jira task, kept so we can reuse what worke
 | Task | Prompt | PR |
 | --- | --- | --- |
 | LEARNING-234 | [Repository foundations](LEARNING-234-repo-foundations.md) | [#1](https://github.com/lucene-nguyen/stuttercut/pull/1) |
-| LEARNING-205 | [ASR model spike](LEARNING-205-asr-spike.md) | — |
+| LEARNING-205 | [ASR model spike](LEARNING-205-asr-spike.md) | [#2](https://github.com/lucene-nguyen/stuttercut/pull/2) |
+| LEARNING-206 | [Worker transcription](LEARNING-206-worker-transcription.md) | — |

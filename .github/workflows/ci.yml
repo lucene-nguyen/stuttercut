@@ -23,6 +23,15 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e "backend[dev]"
+      - name: Install FFmpeg
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update -q && sudo apt-get install -y -q ffmpeg ;;
+            macOS) brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
       - name: Lint
         run: |
           ruff check .
@@ -30,7 +39,9 @@ jobs:
       - name: Type check
         run: mypy backend
       - name: Tests
-        run: pytest
+        run: pytest -rs
+        env:
+          STUTTERCUT_REQUIRE_FFMPEG: "1" # media tests must run here, not skip
 
   frontend:
     runs-on: ubuntu-latest

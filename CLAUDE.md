@@ -91,6 +91,8 @@ cd frontend && npm install
 
 # run (from the repo root, venv active)
 uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
+pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
+python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word counts, peak RAM (no text)
 cd frontend && npm run dev                           # UI on 127.0.0.1:5173, proxies /api
 
 # quality (Python tool config lives in the root pyproject.toml)

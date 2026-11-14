@@ -1,0 +1,28 @@
+{
+  "date": "2026-11-14",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+  "python": "3.11.9",
+  "device_requested": "auto",
+  "device": "cuda",
+  "device_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "models": {
+    "crisperwhisper": "default",
+    "whisper_baseline": "default",
+    "phowhisper": "default"
+  },
+  "clips": [
+    "c001",
+    "633e80af",
+    "5911f3b2",
+    "0ef0e720",
+    "319af07b"
+  ],
+  "versions": {
+    "crisperwhisper": "2.1.0",
+    "faster-whisper": "1.2.1",
+    "ctranslate2": "4.9.0",
+    "torch": "2.15.0+cu132",
+    "transformers": "5.23.0"
+  }
+}

@@ -1,6 +1,6 @@
 # Spike: verbatim ASR models on Vietnamese stuttered clips
 
-Date: 2026-11 · Jira: [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) · Time box: — · Status: **tooling ready, waiting for labelled clips**
+Date: 2026-11 · Jira: [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) · Time box: — · Status: **first full run done (5 clips, no labels yet); waiting for labels**
 
 ## Question
 
@@ -13,7 +13,7 @@ the transcript, with word timestamps accurate enough to cut on, and fits a 16 GB
 | --- | --- | --- |
 | CrisperWhisper 2.0 | `nyralabs/CrisperWhisper2.0_large` (also turbo / medium / small); `crisperwhisper` 2.1.0, transformers backend, `mode="verbatim"` | Trained for verbatim output. v1 (`nyrahealth/CrisperWhisper`) was English/German only and is superseded. The 2.0 card says verbatim mode works "across most languages Whisper supports"; Vietnamese is not confirmed. |
 | Whisper baseline | faster-whisper 1.2.1, `large-v3` (or `turbo`) | Standard Whisper, which tends to clean up disfluencies. Reference point. CTranslate2 has no MPS backend, so it runs on CPU on the Mac. |
-| PhoWhisper | `vinai/PhoWhisper-large` (tiny to large) via the transformers pipeline | Vietnamese fine-tune of Whisper (844 h). Its generation config includes `alignment_heads`, so word timestamps work through cross-attention DTW. |
+| PhoWhisper | `vinai/PhoWhisper-large` (tiny to large) via the transformers pipeline: segment timestamps (`return_timestamps=True`, chunk 30 s, batch 1, fp16), words force-aligned with `nguyenvulebinh/wav2vec2-base-vietnamese-250h` (CTC Viterbi, WhisperX-style) | Vietnamese fine-tune of Whisper (844 h). Its config has `alignment_heads`, but word timestamps from cross-attention were far too heavy on long clips; see [Memory issue](#memory-issue-phowhisper-word-timestamps). |
 
 ### Licenses
 
@@ -24,6 +24,7 @@ the transcript, with word timestamps accurate enough to cut on, and fits a 16 GB
 | faster-whisper large-v3 | MIT (CTranslate2 conversion); original OpenAI weights Apache-2.0 | Yes | <https://huggingface.co/Systran/faster-whisper-large-v3>, <https://huggingface.co/openai/whisper-large-v3> |
 | faster-whisper turbo | MIT | Yes | <https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo> |
 | PhoWhisper | BSD-3-Clause | Yes, under standard BSD-3 terms (check the repo LICENSE file) | <https://huggingface.co/vinai/PhoWhisper-large> |
+| wav2vec2-base-vietnamese-250h (aligner used for PhoWhisper word times) | CC BY-NC 4.0 on the model card; the repo also ships a `CC-BY-NC-SA-4.0.txt` | No | <https://huggingface.co/nguyenvulebinh/wav2vec2-base-vietnamese-250h> |
 
 StutterCut is a personal, local tool today, so a non-commercial licence does not block the
 spike. It does block any commercial use of CrisperWhisper without a licence from Nyra.
@@ -45,7 +46,7 @@ spike. It does block any commercial use of CrisperWhisper without a licence from
     words whose midpoint falls inside the span;
   - pauses in gap: labelled pauses that no word crosses;
   - real-time factor (wall / audio, model load excluded) and peak process RSS.
-- **Hardware:** _fill in from `eval/reports/<date>/run.json`._ Dev machine: Windows 11, AMD
+- **Hardware:** from `eval/reports/<date>/run.json`. Dev machine: Windows 11, AMD
   Ryzen, 32 GB RAM, RTX 4060 Laptop 8 GB. Target: Apple Silicon, 16 GB.
 
 ## Results
@@ -59,6 +60,48 @@ _Pending: the owner runs `run_spike.py` on the labelled clips and sends `summary
 | phowhisper | | | | | | | |
 
 Raw report: `eval/reports/<date>/summary.md` (raw transcripts stay local).
+
+### First full run, before labels (2026-11-14)
+
+5 clips (c001 plus 4 ingested: 633e80af, 5911f3b2, 0ef0e720, 319af07b), all three models at
+default size, Windows 11, RTX 4060 Laptop 8 GB, CUDA (torch 2.15.0+cu132, CTranslate2 4.9.0,
+transformers 5.23.0). Source: [`eval/reports/2026-11-14/runs.md`](../../eval/reports/2026-11-14/runs.md).
+PhoWhisper is attempt 1 below (segments + CTC alignment).
+
+- **Transcribe** = wall time without model load. **RAM** = peak process RSS (per process, so the
+  same for every clip of a model). **VRAM** = rise in GPU memory used (nvidia-smi).
+- **Fillers** = words ờ, à, ừm, ừ written by the model; **Repeats** = earlier copies of
+  immediate repeats. Counts only; without labels they say nothing about accuracy.
+
+| Clip (audio s) | Model | Load s | Transcribe s | RTF | Peak RAM MB | Peak VRAM MB | Words | Fillers | Repeats |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| c001 (160.9) | crisperwhisper | 17.8 | 90.0 | 0.56 | 7943 | 5128 | 746 | 1 | 7 |
+| | whisper_baseline | 9.1 | 29.9 | 0.19 | 3118 | 4466 | 692 | 1 | 3 |
+| | phowhisper | 13.2 | 229.9 | 1.43 | 9329 | 6471 | 570 | 4 | 8 |
+| 633e80af (164.8) | crisperwhisper | 17.8 | 60.0 | 0.36 | 7943 | 5128 | 500 | 0 | 4 |
+| | whisper_baseline | 9.1 | 18.1 | 0.11 | 3118 | 4466 | 460 | 0 | 2 |
+| | phowhisper | 13.2 | 176.9 | 1.07 | 9329 | 6506 | 617 | 0 | 2 |
+| 0ef0e720 (157.8) | crisperwhisper | 17.8 | 58.0 | 0.37 | 7943 | 5128 | 496 | 0 | 5 |
+| | whisper_baseline | 9.1 | 18.1 | 0.12 | 3118 | 4502 | 460 | 0 | 3 |
+| | phowhisper | 13.2 | 98.8 | 0.63 | 9329 | 6540 | 476 | 1 | 2 |
+| 319af07b (41.8) | crisperwhisper | 17.8 | 26.0 | 0.62 | 7943 | 5128 | 257 | 0 | 0 |
+| | whisper_baseline | 9.1 | 10.1 | 0.24 | 3118 | 4550 | 249 | 0 | 0 |
+| | phowhisper | 13.2 | 40.1 | 0.96 | 9329 | 6540 | 260 | 0 | 1 |
+| 5911f3b2 (31.6) | crisperwhisper | 17.8 | 13.8 | 0.44 | 7943 | 5128 | 103 | 0 | 0 |
+| | whisper_baseline | 9.1 | 3.9 | 0.12 | 3118 | 4466 | 100 | 0 | 0 |
+| | phowhisper | 13.2 | 21.0 | 0.67 | 9329 | 6506 | 100 | 0 | 0 |
+
+What the counts suggest (to be checked against labels):
+
+- All three models write almost no filler words: 6 in total across ~11 minutes of speech,
+  4 of them from PhoWhisper in c001. Either these clips have few fillers, or none of the models
+  keeps Vietnamese fillers, CrisperWhisper's verbatim mode included. Labels decide which.
+- CrisperWhisper writes 5–10% more words and about twice the repeats of the baseline, which
+  hints at more verbatim output; it is ~3x slower and uses ~2.5x the RAM.
+- PhoWhisper (with alignment) is the slowest and heaviest: RTF up to 1.43 on the long clips and
+  9.3 GB RAM on this machine.
+- Audio length is the decoded audio stream; for 319af07b the manifest's 44.8 s is the container
+  length from ffprobe.
 
 ### Smoke test (tooling check, not results)
 
@@ -80,6 +123,27 @@ Findings so far:
 - CrisperWhisper `small` already peaks at about 4.7 GB RSS in fp32 on CPU. `large` must be
   measured on the 16 GB Mac (fp16 on MPS) before it can be chosen.
 - faster-whisper cannot use MPS, so on the Mac the baseline runs on CPU.
+
+### Memory issue: PhoWhisper word timestamps
+
+Windows 11, RTX 4060 Laptop (8 GB VRAM), 32 GB RAM, clip c001 (161 s), `vinai/PhoWhisper-large`
+fp16 on CUDA. RAM = peak process RSS; VRAM = rise in GPU memory used (nvidia-smi).
+
+| Attempt | Word timing | Result on c001 | Peak RAM | Peak VRAM | RTF |
+| --- | --- | --- | --- | --- | --- |
+| 0 | transformers `return_timestamps="word"` (cross-attention DTW) | Finished c001 only, then stopped by hand; GPU memory full, Windows spilled into shared RAM and the page file (C: dropped to ~3 GB free) | 19.8 GB | 6.8 GB (GPU full at 7.8 / 8 GB) | 5.32 |
+| 1 | segment timestamps (`return_timestamps=True`, chunk 30 s, batch 1, fp16) + CTC forced alignment with `nguyenvulebinh/wav2vec2-base-vietnamese-250h` | **Works**; 570 words, timestamps monotonic, no zero-length words | 9.6 GB | 6.0 GB | 1.65 |
+| 2 | convert to CTranslate2 and run through faster-whisper | Not needed: attempt 1 works | – | – | – |
+
+- Word-level timestamps in the transformers pipeline keep the cross-attentions of every
+  generated token for the DTW step; on a 161 s clip that does not fit an 8 GB GPU.
+- The first aligner tried, `nguyenvulebinh/wav2vec2-base-vi` (WhisperX's usual choice for
+  Vietnamese), is a pretraining checkpoint **without a CTC head** (`lm_head` missing), so it
+  cannot align. `wav2vec2-base-vietnamese-250h` is the CTC fine-tune and loads with no missing
+  weights.
+- Attempt 1 still needs 9.6 GB RAM and runs slower than real time on this GPU, so PhoWhisper is
+  the heaviest of the three. On a 16 GB Mac it must be measured before it can be chosen; if it
+  is too heavy, attempt 2 (CTranslate2 + faster-whisper) is the next step.
 
 ## Decision
 

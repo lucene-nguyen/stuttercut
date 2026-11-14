@@ -190,7 +190,10 @@ def main() -> int:
     if unknown := set(sizes) - set(RUNNER_NAMES):
         parser.error(f"unknown model in --size: {sorted(unknown)}")
     device = select_device() if args.device == "auto" else args.device
-    print(f"device: {device} ({device_name(device)}){' [auto]' if args.device == 'auto' else ''}")
+    print(
+        f"device: {device} ({device_name(device)}){' [auto]' if args.device == 'auto' else ''}",
+        flush=True,
+    )
 
     clips = load_manifest(args.manifest) if args.manifest else load_manifest()
     if args.clips:

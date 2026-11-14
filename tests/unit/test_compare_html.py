@@ -43,3 +43,13 @@ def test_write_pages_one_per_clip_without_audio(tmp_path: Path) -> None:
 
     assert [p.name for p in pages] == ["c001.html", "c002.html"]
     assert "audio not found" in pages[0].read_text(encoding="utf-8")
+
+
+def test_write_pages_can_limit_models(tmp_path: Path) -> None:
+    for model in ("crisperwhisper", "phowhisper"):
+        (tmp_path / model).mkdir()
+        (tmp_path / model / "c001.json").write_text(json.dumps(result([w("à", 0, 1)])), "utf-8")
+
+    page = write_pages(tmp_path, root=None, only=["crisperwhisper"])[0].read_text("utf-8")
+
+    assert "<h2>crisperwhisper</h2>" in page and "phowhisper" not in page

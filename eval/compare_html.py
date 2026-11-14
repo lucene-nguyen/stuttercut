@@ -107,8 +107,12 @@ def build_page(clip_id: str, results: dict[str, dict[str, Any] | None], audio: s
     return PAGE.format(clip_id=html.escape(clip_id), player=player, columns=columns)
 
 
-def write_pages(report_dir: Path, root: Path | None) -> list[Path]:
-    models = sorted(p for p in report_dir.iterdir() if p.is_dir() and any(p.glob("*.json")))
+def write_pages(report_dir: Path, root: Path | None, only: list[str] | None = None) -> list[Path]:
+    models = sorted(
+        p
+        for p in report_dir.iterdir()
+        if p.is_dir() and any(p.glob("*.json")) and (only is None or p.name in only)
+    )
     clip_ids = sorted({f.stem for m in models for f in m.glob("*.json")})
     out_dir = report_dir / "compare"
     out_dir.mkdir(exist_ok=True)
@@ -132,13 +136,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("report_dir", type=Path, nargs="?", help="default: newest report")
     parser.add_argument("--data-dir", type=Path)
+    parser.add_argument("--models", nargs="+", help="model folders to show (default: all)")
     args = parser.parse_args()
     try:
         root: Path | None = data_dir(args.data_dir)
     except SystemExit as e:
         print(f"{e}; pages will have no audio player")
         root = None
-    for page in write_pages(args.report_dir or newest_report(), root):
+    for page in write_pages(args.report_dir or newest_report(), root, args.models):
         print(page.resolve().as_uri())
 
 

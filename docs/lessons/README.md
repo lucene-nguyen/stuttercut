@@ -10,4 +10,4 @@ What we learned while building StutterCut: surprises, mistakes and the fixes tha
 
 | # | Lesson | Jira | Date |
 | --- | --- | --- | --- |
-| — | _none yet_ | | |
+| [001](001-torch-cuda13-vs-ctranslate2-cuda12.md) | One GPU, two CUDA versions: torch vs CTranslate2 | LEARNING-205 | 2026-11-14 |

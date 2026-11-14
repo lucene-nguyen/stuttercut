@@ -13,18 +13,22 @@ Vietnamese, laptop mic), CrisperWhisper 2.0 large on an RTX 4060.
    detector and the Audacity pre-labels would have missed all 22.
 2. **Importing `silero_vad` calls `torch.set_num_threads(1)`** for the whole process
    (`silero_vad/model.py`, line 3), so every later torch CPU op in the worker runs on one thread.
+   Measured on c001 with CUDA it costs nothing (transcribe 78.0 s at 1 thread vs 81.1 s
+   restored: the heavy work is on the GPU); it matters when the model runs on the CPU.
 3. **silero's default threshold (0.5) hears a noisy laptop mic as speech**: 153 of 161 s on c001
    were "voiced", every word gap held 0.2–3 s of "speech", and the pause rule (gap confirmed
    silent by VAD) never fired.
 4. **The simple retake rule fired on ordinary phrases**: 19 candidates on c001, 12 of them with
    no pause or filler before the "restart" — just a two-word phrase recurring within 4 s.
 5. **Timings were confounded by a game using the same GPU** (73% GPU busy before the run):
-   transcribe took 232–267 s instead of 79 s, which I first blamed on point 2.
+   transcribe took 232–267 s instead of ~80 s, which I first blamed on point 2. With the game
+   closed: 81.1 s, cuts identical.
 
 ## What I learned
 - Count the model's real output tokens on a real clip before writing rules or metrics; the
   filler list now lives once in `RulesConfig.filler_tokens` and `eval/` imports it.
-- Treat library imports as possibly global side effects; `SileroVad` restores the thread count.
+- Treat library imports as possibly global side effects; `SileroVad` restores the thread count
+  (cheap insurance for CPU runs, even though it made no difference on CUDA).
 - A VAD threshold is a property of the microphone, not a constant: default 0.8 for now,
   provisional until labelled clips (STUTTERCUT_VAD_THRESHOLD).
 - A retake now needs a hesitation (filler or >= 300 ms silence) right before the restart.

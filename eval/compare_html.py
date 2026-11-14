@@ -1,9 +1,9 @@
 """Side-by-side transcript pages: python -m eval.compare_html [<report_dir>]
 
 Writes <report_dir>/compare/<clip_id>.html (git-ignored): one column per model, word start
-time on hover, fillers (ờ, à, ừm, ừ) and immediate repeats highlighted, and an audio player
-that seeks to a word when you click it. The player points at the original clip in
-$STUTTERCUT_DATA_DIR; nothing is copied. Open the pages locally in a browser.
+time on hover, fillers (the detector's list: ờ, ừm, [UH], [UM], ...) and immediate repeats
+highlighted, and an audio player that seeks to a word when you click it. The player points
+at the original clip in $STUTTERCUT_DATA_DIR; nothing is copied. Open the pages locally.
 """
 
 import argparse

@@ -3,8 +3,8 @@
 Writes $STUTTERCUT_DATA_DIR/audacity/<clip_id>.prelabel.txt (Audacity label format):
 - "pause": FFmpeg silencedetect (> 600 ms below -35 dB), trimmed 150 ms each side as in the
   labelling guide;
-- "filler?" / "repeat?": filler words (ờ, à, ừm, ừ) and earlier copies of immediate repeats
-  from the best transcript in the newest report.
+- "filler?" / "repeat?": filler words (the detector's list: ờ, ừm, [UH], [UM], ...) and
+  earlier copies of immediate repeats from the best transcript in the newest report.
 Import it in Audacity (File > Import > Labels), fix and confirm each suggestion (remove "?"),
 then export your labels as <clip_id>.txt. convert_audacity skips *.prelabel.txt files.
 """

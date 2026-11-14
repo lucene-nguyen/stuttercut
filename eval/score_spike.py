@@ -199,6 +199,48 @@ def to_markdown(summary: dict[str, Any]) -> str:
 LABELS = Path(__file__).parent / "labels"
 
 
+def runs_markdown(report_dir: Path) -> str:
+    """Per-clip run table (no labels needed): timings, memory, disfluencies found. No text."""
+    results = [
+        json.loads(f.read_text(encoding="utf-8"))
+        for model_dir in sorted(p for p in report_dir.iterdir() if p.is_dir())
+        for f in sorted(model_dir.glob("*.json"))
+    ]
+    lines = [
+        "# ASR spike runs",
+        "",
+        "Fillers = words ờ, à, ừm, ừ. Repeats = earlier copies of immediate repeats. "
+        "Transcribe = wall time without model load. VRAM = rise in GPU memory used "
+        "(nvidia-smi), CUDA only.",
+    ]
+    for clip_id in sorted({r["clip_id"] for r in results}):
+        rows = [r for r in results if r["clip_id"] == clip_id]
+        lines += [
+            "",
+            f"## {clip_id} ({rows[0]['audio_s']:.1f} s)",
+            "",
+            "| Model | Device | Load s | Transcribe s | RTF | Peak RAM MB | Peak VRAM MB "
+            "| Words | Fillers | Repeats |",
+            "| --- | --- " + "| ---: " * 8 + "|",
+        ]
+        for r in rows:
+            words = r["words"]
+            vram = r.get("peak_vram_mb")
+            lines.append(
+                f"| {r['model']} | {r['device']} | {r['load_s']} | {r['wall_s']} | {r['rtf']} "
+                f"| {r['peak_rss_mb']:.0f} | {'-' if vram is None else f'{vram:.0f}'} "
+                f"| {len(words)} | {sum(is_filler(w['word']) for w in words)} "
+                f"| {len(repeat_indices(words))} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def write_runs(report_dir: Path) -> Path:
+    out = report_dir / "runs.md"
+    out.write_text(runs_markdown(report_dir), encoding="utf-8")
+    return out
+
+
 def write_summary(report_dir: Path, labels_dir: Path = LABELS, tol: float = 0.15) -> dict[str, Any]:
     """Score and write summary.md/json; writes nothing when no clip has labels yet."""
     summary = score_report(report_dir, labels_dir, tol)
@@ -215,6 +257,7 @@ def main() -> None:
     parser.add_argument("--tolerance", type=float, default=0.15, help="seconds (default 0.15)")
     args = parser.parse_args()
     report_dir = args.report_dir or newest_report()
+    write_runs(report_dir)
     if not write_summary(report_dir, args.labels, args.tolerance)["models"]:
         raise SystemExit(f"nothing to score in {report_dir} (no labelled clips?)")
     print(f"wrote {report_dir / 'summary.md'} and summary.json")

@@ -116,3 +116,28 @@ def test_write_summary_skips_when_nothing_is_labelled(tmp_path: Path) -> None:
 
     assert write_summary(tmp_path, tmp_path / "no-labels")["models"] == {}
     assert not (tmp_path / "summary.md").exists()
+
+
+def test_runs_markdown_counts_disfluencies_without_text(tmp_path: Path) -> None:
+    from eval.score_spike import write_runs
+
+    (tmp_path / "phowhisper").mkdir()
+    result = {
+        "clip_id": "c001",
+        "model": "phowhisper",
+        "device": "cuda",
+        "load_s": 3.2,
+        "audio_s": 60.0,
+        "wall_s": 6.0,
+        "rtf": 0.1,
+        "peak_rss_mb": 1500.4,
+        "peak_vram_mb": 2048.0,
+        "words": WORDS,
+    }
+    (tmp_path / "phowhisper" / "c001.json").write_text(json.dumps(result), "utf-8")
+
+    md = write_runs(tmp_path).read_text(encoding="utf-8")
+
+    assert "## c001 (60.0 s)" in md
+    assert "| phowhisper | cuda | 3.2 | 6.0 | 0.1 | 1500 | 2048 | 7 | 2 | 1 |" in md
+    assert "Tôi" not in md

@@ -28,7 +28,7 @@ from eval.asr_runners import RUNNER_NAMES, get_loader
 from eval.env import REPORTS, data_dir
 from eval.ingest import find_media
 from eval.manifest import load_manifest
-from eval.score_spike import write_summary
+from eval.score_spike import write_runs, write_summary
 from stuttercut.platform import select_device
 
 
@@ -63,6 +63,40 @@ class PeakRss:
         return round(self.peak / 2**20, 1)
 
 
+class PeakVram:
+    """GPU 0 memory in use (nvidia-smi), sampled in a thread; ``peak_mb`` is the rise over the
+    level when this process started. Device-wide, so it covers torch and CTranslate2 alike;
+    models run one process at a time, so the rise is this model's footprint (CUDA context
+    included). None when not on CUDA or nvidia-smi is missing."""
+
+    CMD = ("nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits", "-i", "0")
+
+    def __init__(self, device: str, interval_s: float = 0.25) -> None:
+        self.baseline = self._query() if device == "cuda" else None
+        self.peak = self.baseline
+        if self.baseline is not None:
+            threading.Thread(target=self._run, args=(interval_s,), daemon=True).start()
+
+    def _query(self) -> float | None:
+        try:
+            out = subprocess.run(self.CMD, capture_output=True, text=True, timeout=10).stdout
+            return float(out.strip().splitlines()[0])
+        except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+            return None
+
+    def _run(self, interval_s: float) -> None:
+        while True:
+            if (used := self._query()) is not None and self.peak is not None:
+                self.peak = max(self.peak, used)
+            time.sleep(interval_s)
+
+    @property
+    def peak_mb(self) -> float | None:
+        if self.peak is None or self.baseline is None:
+            return None
+        return round(self.peak - self.baseline, 1)
+
+
 def run_model(
     name: str, size: str | None, device: str, items: list[tuple[str, str, float]], out: str
 ) -> None:
@@ -70,6 +104,7 @@ def run_model(
     out_dir = Path(out) / name
     out_dir.mkdir(parents=True, exist_ok=True)
     rss = PeakRss()
+    vram = PeakVram(device)
     t0 = time.perf_counter()
     try:
         runner = get_loader(name)(size, device)
@@ -103,6 +138,7 @@ def run_model(
             "wall_s": wall_s,
             "rtf": round(wall_s / audio_s, 3),
             "peak_rss_mb": rss.peak_mb,
+            "peak_vram_mb": vram.peak_mb if runner.device == "cuda" else None,
             "words": words,
         }
         (out_dir / f"{clip_id}.json").write_text(
@@ -195,6 +231,7 @@ def main() -> int:
                 failures.append(name)
 
     print(f"done: {args.out}" + (f" (failures: {', '.join(failures)})" if failures else ""))
+    print(f"runs: {write_runs(args.out)}")
     summary = write_summary(args.out)  # clips without eval/labels/<clip_id>.cuts.json are skipped
     if summary["models"]:
         print(f"scored: {args.out / 'summary.md'}")

@@ -23,5 +23,8 @@ this ADR is accepted, amended or superseded based on its results.
 - Detection quality depends on the model keeping disfluencies in Vietnamese; this is the main
   project risk until LEARNING-205 reports.
 - The model download and memory use must fit a 16 GB Mac; it loads only in the worker.
+- CrisperWhisper 2.0 weights (`nyralabs/CrisperWhisper2.0_*`) are under a non-commercial
+  research licence; commercial use needs a licence from Nyra Health (see
+  [the spike report](../spikes/2026-11-asr-models.md)).
 - The `Transcriber` interface keeps unit and integration tests fast and offline, and makes a
   model swap a local change.

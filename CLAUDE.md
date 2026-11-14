@@ -99,6 +99,12 @@ mypy backend                                         # strict on backend/stutter
 pytest                                               # all tests except golden (fake transcriber)
 pytest -m golden                                     # accuracy eval, real model (slow); exits 5 until golden tests exist
 pre-commit run --all-files
+
+# ASR spike eval (LEARNING-205), see docs/guides/running-eval.md
+pip install -e "backend[dev,eval]"
+python -m eval.convert_audacity "$STUTTERCUT_DATA_DIR/audacity" eval/labels
+python -m eval.run_spike                             # needs STUTTERCUT_DATA_DIR + labelled clips
+python -m eval.score_spike eval/reports/<date>
 cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
 cd frontend && npm run build
 ```

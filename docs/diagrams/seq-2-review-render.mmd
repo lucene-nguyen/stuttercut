@@ -1,0 +1,28 @@
+---
+title: "Sequence 2: Review, approve and render"
+---
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as Web UI (React)
+  participant API as API server (FastAPI)
+  participant DB as SQLite
+  participant W as Worker process
+  participant FF as FFmpeg
+  U->>UI: Open Review
+  UI->>API: GET /api/jobs/{id} + preview (Range)
+  API->>DB: read words + cuts
+  API-->>UI: transcript, cuts, 480p video
+  loop each keep / cut click
+    UI->>API: PATCH /cuts/{cut_id} {kept}
+    API->>DB: update cut
+    API-->>UI: new clean duration
+  end
+  U->>UI: Approve & render (mp4 / xml / both)
+  UI->>API: POST /api/jobs/{id}/render
+  API->>W: dispatch render
+  W->>DB: read active cuts
+  W->>FF: trim + concat + crossfade, encode
+  FF-->>W: name_clean.mp4 (or FCP XML)
+  W->>DB: span render_mp4, job done
+  API-->>UI: SSE done, Show in Finder

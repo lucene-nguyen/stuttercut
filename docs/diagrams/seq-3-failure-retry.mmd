@@ -1,0 +1,30 @@
+---
+title: "Sequence 3: Failure, watchdog and retry"
+---
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as Web UI (React)
+  participant API as API server + Watchdog
+  participant W as Worker process
+  participant DB as SQLite + logs
+  API->>W: start job (separate process)
+  loop every 1 s
+    API->>W: check RSS, CPU, step time
+  end
+  alt over RAM limit or step timeout
+    API->>W: terminate, then kill
+    API->>DB: span error, job failed, ERROR log
+  else worker error (e.g. FFmpeg exit 1)
+    W->>DB: span error + stderr, job failed
+  end
+  API->>API: respawn fresh worker
+  API-->>UI: SSE failed {step, reason}
+  UI-->>U: Failed at step, View trace / Retry
+  opt View trace
+    UI->>API: GET /trace + /logs?job=id
+    API-->>UI: spans + log lines
+  end
+  U->>UI: Retry
+  UI->>API: POST /api/jobs/{id}/retry
+  API->>W: re-run from failed step, cuts kept

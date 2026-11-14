@@ -1,0 +1,31 @@
+---
+title: "Sequence 1: Upload and processing"
+---
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as Web UI (React)
+  participant API as API server (FastAPI)
+  participant W as Worker process
+  participant ASR as CrisperWhisper + FFmpeg
+  participant LLM as LLM API
+  U->>UI: Drop video + options
+  UI->>API: POST /api/jobs
+  alt longer than 3 min or too large
+    API-->>UI: 422 + reason (inline error)
+  else valid
+    API-->>UI: 201 job_id, SSE stream opens
+    API->>W: dispatch job (queue, 1 at a time)
+    W->>ASR: extract audio + 480p preview
+    W->>ASR: transcribe (verbatim, word timestamps)
+    ASR-->>W: words with start/end
+    W->>W: rule engine: repeats, fillers, pauses
+    W->>LLM: transcript text only
+    alt answer within 30 s
+      LLM-->>W: retake ranges
+    else timeout or error
+      W->>W: WARN log, rules-only cuts
+    end
+    W-->>API: cuts + spans saved (SQLite)
+    API-->>UI: SSE ready
+  end

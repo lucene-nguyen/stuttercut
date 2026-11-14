@@ -25,4 +25,19 @@ Run lint, type check and all tests locally; fix until green. Commit in small Con
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/1 (squash-merged 2026-11-14)
+
+**Worked well**
+- CI green on the first run on ubuntu, windows and macos (run 43576958847).
+- Layout, ADRs 0001–0004, pre-commit and README landed as asked; every commit carried the Jira key.
+
+**Had to be corrected or deviated from the prompt**
+- Repo had no commits, so a PR had no base: one docs-only commit went to `main` first.
+- Tool config moved to a root `pyproject.toml` (ruff/mypy/pytest run from the root); the package stays in `backend/pyproject.toml`.
+- Added `.gitattributes` forcing LF, because git on Windows converted to CRLF and broke the formatters.
+- Review follow-ups: `npm run build` in CI, `tests/media/README.md` (synthetic clips generated at test time).
+- `gh` was not installed, so the PR had to be opened by hand; the CLAUDE.md workflow now uses `gh pr create` + `gh pr checks --watch`.
+
+**Next time**
+- Check that `gh` is installed and authenticated before a task that ends in a PR.
+- Do not let the agent install packages with look-alike names (it tried `httpx2`; blocked).

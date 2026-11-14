@@ -9,4 +9,4 @@ Time-boxed experiments that answer one question with data before we build on it.
 
 | Spike | Question | Decision | Jira |
 | --- | --- | --- | --- |
-| _planned_ | Which ASR model keeps Vietnamese stutters with accurate word timestamps? | — | [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) |
+| [2026-11-asr-models](2026-11-asr-models.md) | Which ASR model keeps Vietnamese stutters with accurate word timestamps? | CrisperWhisper 2.0 large verbatim + verbatim/intended diff + VAD + pause rules; PhoWhisper dropped ([ADR 0002](../adr/0002-crisperwhisper-verbatim-asr.md)) | [LEARNING-205](https://lucenenguyen.atlassian.net/browse/LEARNING-205) |

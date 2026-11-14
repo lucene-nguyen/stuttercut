@@ -43,6 +43,8 @@ models/
 *.m4a
 *.mp3
 eval/clips/
+# Raw spike transcripts of real voices stay local; only summary.md/json are committed.
+eval/reports/*/*/
 media_out/
 outputs/
 

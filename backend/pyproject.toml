@@ -21,6 +21,14 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.6",
 ]
+# ASR spike (LEARNING-205) only; see docs/guides/running-eval.md for CUDA torch.
+eval = [
+    "crisperwhisper[transformers]>=2.1.0",
+    "faster-whisper>=1.1",
+    "psutil>=6.0",
+    "torch>=2.4",
+    "transformers>=4.56",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["stuttercut"]

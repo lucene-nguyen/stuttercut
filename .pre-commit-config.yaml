@@ -1,0 +1,36 @@
+# ruff and mypy run from the active venv so their versions match backend[dev].
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: tsconfig.*\.json$ # JSONC (comments allowed)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff-format
+        entry: ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        files: ^backend/

@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Local web app that detects and cuts stutters in short Vietnamese videos."
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=2.8",  # LLM review of cut candidates (LEARNING-208); text only
     "fastapi>=0.115",
     "platformdirs>=4.2",
     "psutil>=6.0",

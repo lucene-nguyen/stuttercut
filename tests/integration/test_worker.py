@@ -3,6 +3,7 @@
 import queue
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -255,7 +256,7 @@ def test_llm_review_updates_tiers_and_adds_retakes(
     assert (cuts["repeat"]["llm_verdict"], cuts["repeat"]["tier"]) == ("cut", "sure")
     assert cuts["retake"]["source"] == "llm"
     job = repo.get_job(conn, job_id)
-    assert job is not None and job["llm_input_tokens"] == 100 and job["llm_cost_usd"] > 0
+    assert job is not None and job["llm_input_tokens"] == 100 and job["llm_cost_usd"] == 0.0
     sent = "\n".join(call["prompt"] for call in llm.calls)
     assert str(video) not in sent and "bài nói" not in sent and "0.65" not in sent  # text only
 
@@ -279,3 +280,40 @@ def test_llm_failure_falls_back_to_rules_only(
     assert spans(conn, job_id)[-1] == ("llm_review", "error")
     assert repo.cut_counts(conn, job_id, "tier") == {"sure": 2}
     assert any(r.levelname == "WARNING" and r.job_id == job_id for r in caplog.records)  # type: ignore[attr-defined]
+
+
+def _with_llm(cfg: Config, **llm: object) -> Config:
+    return replace(cfg, llm=replace(cfg.llm, **llm))  # type: ignore[arg-type]
+
+
+def test_local_llm_unloads_asr_when_ram_is_low_and_next_job_reloads(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    from stuttercut.llm.fake import FakeLLMClient
+
+    low_ram = _with_llm(cfg, unload_asr_below_gb=1e6)  # any machine is "below"
+    asr = FakeTranscriber(FIXTURE)
+    first = repo.create_job(conn, str(make_video()))
+    assert run_job(conn, low_ram, first, asr, None, FakeLLMClient(_llm_judges_all)) == (
+        "ready_for_review"
+    )
+    assert [s for s, _ in spans(conn, first)][-2:] == ["unload_asr", "llm_review"]
+    assert not asr.loaded
+
+    second = repo.create_job(conn, str(make_video()))
+    assert run_job(conn, low_ram, second, asr, None, None) == "ready_for_review"
+    assert ("load_model", "ok") in spans(conn, second) and asr.loads == 1
+
+
+@pytest.mark.parametrize(("provider", "below_gb"), [("ollama", 0.0), ("anthropic", 1e6)])
+def test_asr_stays_loaded_with_enough_ram_or_a_remote_llm(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path],
+    provider: str, below_gb: float,
+) -> None:  # fmt: skip
+    from stuttercut.llm.fake import FakeLLMClient
+
+    asr = FakeTranscriber(FIXTURE)
+    job_id = repo.create_job(conn, str(make_video()))
+    run_job(conn, _with_llm(cfg, provider=provider, unload_asr_below_gb=below_gb), job_id, asr,
+            None, FakeLLMClient(_llm_judges_all))  # fmt: skip
+    assert asr.loaded and "unload_asr" not in [s for s, _ in spans(conn, job_id)]

@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+from stuttercut.asr import Unloadable
 from stuttercut.config import load_config
 from stuttercut.observability.logging import setup_logging
 from stuttercut.observability.metrics import PeakRss
@@ -50,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
         vad = load_vad(cfg)
         llm = load_llm(cfg)
         status = run_job(conn, cfg, job_id, transcriber, vad, llm)
+        resident = getattr(llm, "resident", lambda: None)()  # before keep_alive expires
+        reload_s = None
+        if isinstance(transcriber, Unloadable) and not transcriber.loaded:
+            t0 = time.perf_counter()  # what the next job pays for the unload
+            transcriber.load()
+            reload_s = time.perf_counter() - t0
 
     for s in repo.get_spans(conn, job_id):
         print(f"  {s['step']:<14} {s['duration_s']:>7.2f} s  {s['status']}")
@@ -75,15 +82,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cuts by {by}: {listed} (total {sum(by_count.values())})")
     print(f"vad {'silero' if vad else 'off'}")
     if llm is None:
-        print("llm review off (STUTTERCUT_LLM_ENABLED=false or no LLM_API_KEY)")
+        print("llm review off (STUTTERCUT_LLM_ENABLED=false, or anthropic without LLM_API_KEY)")
     else:
         cuts = repo.get_cuts(conn, job_id)
         keeps = sum(c["llm_verdict"] == "keep" for c in cuts)
         new = sum(c["source"] == "llm" for c in cuts)
+        if resident:
+            print(f"llm resident in Ollama: {resident[0]} MB, of which VRAM {resident[1]} MB")
         print(
-            f"llm {llm.model}: tokens in {job['llm_input_tokens']} out {job['llm_output_tokens']}, "
+            f"llm {cfg.llm.provider} {llm.model}: "
+            f"tokens in {job['llm_input_tokens']} out {job['llm_output_tokens']}, "
             f"cost ${job['llm_cost_usd']}, verdict keep {keeps}, new retakes {new}"
         )
+    if reload_s is not None:
+        print(f"asr unloaded before llm_review; reload {reload_s:.1f} s (paid by the next job)")
     print(f"db {paths.db_path(cfg)}\nlog {log_file}")
     conn.close()
     return 0 if status == "ready_for_review" else 1

@@ -1,8 +1,11 @@
 """The steps for one job: extract_audio -> transcribe -> detect [-> llm_review] (ADR 0002/0003).
 
-llm_review runs only when an LLM client is given (STUTTERCUT_LLM_ENABLED=true and a key). If
-it fails, the job keeps its rules-only cuts and tiers: WARN log, span error, still
-ready_for_review (design: "LLM fails -> rules-only").
+llm_review runs only when an LLM client is given (STUTTERCUT_LLM_ENABLED=true). With the local
+provider (ollama) and free RAM below STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB, the ASR model is
+unloaded first (span unload_asr) and loaded again before the next transcribe (span load_model):
+the two models never sit in memory together on a 16 GB Mac. If the review fails, the job
+keeps its rules-only cuts and tiers: WARN log, span error, still ready_for_review
+(design: "LLM fails -> rules-only").
 
 Status: processing -> transcribed -> ready_for_review, or failed + failed_step. Every step
 records a span; any error is logged with the job id. Words and detected cuts are replaced on
@@ -13,7 +16,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from stuttercut.asr import Transcriber
+from stuttercut.asr import Transcriber, Unloadable
 from stuttercut.config import Config
 from stuttercut.llm import LLMClient
 from stuttercut.llm.review import review
@@ -21,6 +24,7 @@ from stuttercut.media.audio import MediaError, extract_audio
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.observability.spans import span
+from stuttercut.platform import free_ram_gb
 from stuttercut.rules import Interval
 from stuttercut.rules.detect import detect
 from stuttercut.storage import paths, repo
@@ -84,6 +88,24 @@ def _llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClie
     )  # fmt: skip
 
 
+def _free_asr_for_local_llm(
+    conn: sqlite3.Connection, cfg: Config, job_id: str, transcriber: Transcriber
+) -> None:
+    if cfg.llm.provider != "ollama" or not isinstance(transcriber, Unloadable):
+        return
+    free = free_ram_gb()
+    if not transcriber.loaded or free >= cfg.llm.unload_asr_below_gb:
+        return
+    with span(conn, job_id, "unload_asr"):
+        transcriber.unload()
+    log.info(
+        "ASR model unloaded before the local LLM",
+        extra={"job_id": job_id, "free_ram_gb": round(free, 1),
+               "free_ram_gb_after": round(free_ram_gb(), 1),
+               "threshold_gb": cfg.llm.unload_asr_below_gb},
+    )  # fmt: skip
+
+
 def _try_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClient) -> None:
     try:
         with span(conn, job_id, "llm_review"):
@@ -113,6 +135,10 @@ def run_job(
             with span(conn, job_id, step):
                 duration = extract_audio(Path(job["source_path"]), wav, cfg.media)
                 repo.update_job(conn, job_id, duration_s=round(duration, 3))
+            if isinstance(transcriber, Unloadable) and not transcriber.loaded:
+                step = "load_model"  # freed for the local LLM after the previous job
+                with span(conn, job_id, step):
+                    transcriber.load()
             step = "transcribe"
             with span(conn, job_id, step):
                 pair = transcriber.transcribe(wav)
@@ -128,6 +154,11 @@ def run_job(
         finally:
             repo.update_job(conn, job_id, peak_rss_mb=rss.peak_mb)
         if llm is not None:
+            try:
+                _free_asr_for_local_llm(conn, cfg, job_id, transcriber)
+            except Exception:  # an unload problem must not block the review
+                log.warning("could not unload the ASR model", exc_info=True,
+                            extra={"job_id": job_id})  # fmt: skip
             _try_llm_review(conn, cfg, job_id, llm)
     repo.set_status(conn, job_id, "ready_for_review")
     log.info("job ready for review", extra={"job_id": job_id, **repo.word_counts(conn, job_id)})

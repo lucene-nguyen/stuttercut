@@ -24,8 +24,18 @@ class FakeTranscriber:
         self._passes = passes
         self._error = error
         self.calls: list[Path] = []
+        self.loaded = True
+        self.loads = 0  # reloads after unload()
+
+    def load(self) -> None:
+        if not self.loaded:
+            self.loaded, self.loads = True, self.loads + 1
+
+    def unload(self) -> None:
+        self.loaded = False
 
     def transcribe(self, audio_path: Path) -> TranscriptPair:
+        assert self.loaded, "transcribe() after unload() without load()"
         self.calls.append(audio_path)
         if self._error is not None:
             raise self._error

@@ -34,8 +34,10 @@ Edit `.env`:
 
 ```bash
 STUTTERCUT_DATA_DIR=/Users/<you>/stuttercut-data    # clips/, audacity/, index.csv; outside the repo
-LLM_API_KEY=
 ```
+
+For the LLM review (optional), install Ollama and pull the model: see
+[local-llm.md](local-llm.md).
 
 ## 3. Frontend
 

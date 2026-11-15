@@ -23,6 +23,16 @@ Out of scope: UI (209), render (210).
 Run lint, mypy, pytest. If a key is configured, run the CLI on c001 with the LLM enabled and report tier counts, how many candidates the LLM marked keep, new retakes, time and tokens. Commit in small Conventional Commits with LEARNING-208, push, open the PR with gh, watch CI until green, do not merge.
 ```
 
+## Follow-up: local LLM provider
+
+```text
+LEARNING-208 follow-up on the same branch: add a local LLM provider.
+1. OllamaClient implementing LLMClient via Ollama's local HTTP API (127.0.0.1:11434), JSON output enforced, same schema validation/retry/timeout. Config STUTTERCUT_LLM_PROVIDER = ollama (default) | anthropic, STUTTERCUT_LLM_MODEL (pick a 7–8B model with good Vietnamese, tell me which and why).
+2. Memory: before llm_review, unload the ASR model and free CUDA/MPS memory when free RAM is below a config threshold; record the extra reload cost in the CLI output.
+3. Run c001 with the local model (pull it if needed, keep the 5 GB free-disk guard). Report tier counts, keep verdicts, new retakes, llm_review time, peak RAM/VRAM, and show 5 example verdicts as (reason, verdict, confidence) only — no transcript text.
+4. Update ADR 0001/0002 notes, .env.example and running docs. Commit with LEARNING-208, push, watch CI, do not merge.
+```
+
 ## Outcome
 
 _Fill in after the PR merges._

@@ -36,8 +36,10 @@ Edit `.env` (forward slashes avoid escaping problems):
 
 ```
 STUTTERCUT_DATA_DIR=C:/work-space/stuttercut-data
-LLM_API_KEY=
 ```
+
+For the LLM review (optional), install Ollama and pull the model: see
+[local-llm.md](local-llm.md).
 
 Git converts line endings for you; the repo's `.gitattributes` keeps LF in the repository.
 

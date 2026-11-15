@@ -62,7 +62,19 @@ process.
   candidate on an RTX 4060); 300-word chunks took up to 30 s and timed out. If the context
   fills up, the review fails with a clear error instead of Ollama silently dropping the start of the prompt.
 
-## 4. Check on a clip
+## 4. How verdicts change the tiers
+
+The merge is asymmetric: the LLM can only lower a cut's confidence, never lift it to `sure`.
+
+- `cut`: the rule confidence stays as it is.
+- `keep`: `min(rule, 0.4 * rule + 0.6 * (1 - LLM confidence))`, and always below
+  `STUTTERCUT_TIER_SURE_MIN` (0.7), so the cut is shown as `unsure`. It is never removed.
+- Retakes the LLM finds enter as `unsure`.
+
+Why: qwen3:8b calls almost everything "cut", including meaningful "à"/"ừ" (bench below), so a
+"cut" verdict carries no information, while a wrong "keep" only costs a second look.
+
+## 5. Check on a clip
 
 ```bash
 python -m stuttercut.worker.cli "<video>"
@@ -73,7 +85,7 @@ retakes N`, `llm peak in Ollama: ... MB, of which VRAM ... MB`, and, when the AS
 unloaded, `asr unloaded before llm_review; reload N s`. Never paste transcript text into
 issues or PRs; the CLI prints none.
 
-## Measured on c001 (161 s, 746 words, 48 candidates; RTX 4060 8 GB, 2026-11-15)
+## Performance on c001 (161 s, 746 words, 48 candidates; RTX 4060 8 GB, 2026-11-15)
 
 | | ASR unloaded (default) | ASR kept on the GPU |
 | --- | --- | --- |
@@ -87,16 +99,49 @@ issues or PRs; the CLI prints none.
 
 Chunk peak: 2.0k tokens in + 0.6k out, so 6144 leaves room for a chunk twice as dense.
 
+## Verdict quality: the bench (eval/llm_bench)
+
+35 hand-written sentences (no real voices) with the expected verdict per case: hesitation
+fillers, meaningful à/ừ/ờ, true vs intentional repeats, retake candidates, retakes with no
+candidate, and wordless VAD candidates. Each case runs through the real prompt and schema.
+
+```bash
+python -m eval.llm_bench --provider ollama            # or anthropic (needs LLM_API_KEY)
+python -m eval.llm_bench --model qwen2.5:7b --runs 3
+```
+
+It prints accuracy per category and `stable` (same answer in every run). qwen3:8b, RTX 4060,
+2026-11-15, 3 runs each:
+
+| category (n) | first prompt | current prompt | current, thinking on (1 run, diagnostic) |
+| --- | --- | --- | --- |
+| filler_hesitation (7) | 100% | 86% | 86% |
+| filler_meaningful (7) | 0% | 57% | 57% |
+| repeat_true (4) | 100% | 25% | 100% |
+| repeat_intentional (4) | 0% | 100% | 75% |
+| retake_candidate (5) | 60% | 60% | 60% (2 timeouts) |
+| retake_found (4) | 50% (never finds one) | 50% (never finds one) | 50% (2 timeouts) |
+| vad_no_text (4) | 50% | 50% | 75% (1 error) |
+| **all (35)** | **51%** | **63%** | **71%** (83% of answered) |
+| stable over 3 runs | 100% | 100% | — |
+| time per case | 1.1 s | 1.2 s | 40 s |
+
+The first prompt said "cut" to all 35 cases. The current prompt puts the reason before the
+verdict, shows each candidate's words in place (an 8B model looks words up by index poorly)
+and drops the rule confidence (it anchored the model to "cut"). Its "keep" is right 9 of 14
+times. Thinking helps but is far too slow for the 30 s chunk timeout. On c001 (tune split)
+the current prompt gives 3 keep verdicts, 0 new retakes, 22 sure / 26 unsure (rules-only:
+22 / 26), `llm_review` 54 s.
+
 ## Known limits (qwen3:8b, LEARNING-208)
 
-- **"à"/"ừ" with meaning are not recognised.** Probe with six synthetic sentences: all three
-  hesitations were judged cut, but so were the question particle ("... rồi à"), the
-  interjection ("à, ra là vậy") and "ừ" as an answer (3/6 right, every one cut at 0.90). With
-  rule confidence 0.6 that lifts a meaningful "à" to tier `sure`. Review those cuts by ear.
+- **Weak verdicts.** 63% on the bench; half of the meaningful "à"/"ừ"/"ờ" still get "cut"
+  (harmless with the asymmetric merge: they keep their rule tier) and 3 of 4 true repeats get
+  "keep" (they drop to `unsure`).
+- **No retakes found** on the bench or c001 with thinking off.
 - **Wordless candidates are a guess.** The LLM reads text only; for a VAD candidate it knows
   only that some sound sits after word i.
-- **Verdicts are not stable** across small prompt changes even at temperature 0 (c001 repeats:
-  5 keep, then 2 keep after an unrelated prompt fix).
+- The bench is small and written by us; a few points of accuracy are one or two cases.
 
 ## Troubleshooting
 

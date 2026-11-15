@@ -112,6 +112,7 @@ python -m eval.convert_audacity "$STUTTERCUT_DATA_DIR/audacity" eval/labels
 python -m eval.run_spike                             # needs STUTTERCUT_DATA_DIR + labelled clips
 python -m eval.score_spike eval/reports/<date>
 python -m eval.score_cuts                            # detector P/R/F1 vs eval/labels (needs a CLI run per clip)
+python -m eval.llm_bench --provider ollama           # LLM verdict accuracy on synthetic sentences (3 runs)
 cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
 cd frontend && npm run build
 ```

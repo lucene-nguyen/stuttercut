@@ -33,6 +33,16 @@ LEARNING-208 follow-up on the same branch: add a local LLM provider.
 4. Update ADR 0001/0002 notes, .env.example and running docs. Commit with LEARNING-208, push, watch CI, do not merge.
 ```
 
+## Follow-up: asymmetric merge and LLM bench
+
+```text
+Decisions for PR #5 (LEARNING-208):
+1. Asymmetric merge for all reasons: the LLM can only lower confidence (keep -> demote to unsure); it never raises a candidate to sure. LLM-proposed retakes enter as unsure. Update tests and docs.
+2. Add eval/llm_bench/: ~30 hand-written Vietnamese sentences (no real voices) covering hesitation fillers, meaningful à/ừ/ờ (question particle, "à, ra là vậy", answers), true repeats vs intentional repetition, retakes, and no-text VAD candidates; expected verdict per case. "python -m eval.llm_bench --provider ollama|anthropic" prints accuracy per category and determinism over 3 runs.
+3. Run it on qwen3:8b now. c001 is in the tune split, so prompt tuning on it is allowed.
+Commit with LEARNING-208, push, watch CI, do not merge. I will add an Anthropic key later to compare.
+```
+
 ## Outcome
 
 _Fill in after the PR merges._

@@ -273,7 +273,9 @@ def test_candidates_by_word_index_and_prompt_has_no_times_or_paths() -> None:
     assert "0\t[UH]" in prompt and '"silence_after_word": 4' in prompt  # pause
     vad = build_prompt(WORDS, (0, 7), to_candidates([row(5, 2.42, 2.48, "filler", "vad")], WORDS))
     assert '"unwritten_sound_after_word": 4' in vad and "silence_after" not in vad
-    for forbidden in ("0.4", "3.0", "start_s", ".mp4", "C:/", "c001"):
+    assert '"context": "tôi tôi sẽ nói >>~<< vậy à"' in vad
+    assert '"text": "tôi", "context": "[UH] >>tôi<< tôi sẽ nói vậy"' in prompt
+    for forbidden in ("0.4", "0.9", "3.0", "start_s", "rule_confidence", ".mp4", "C:/", "c001"):
         assert forbidden not in prompt
 
 
@@ -288,14 +290,16 @@ def test_candidate_goes_to_first_chunk_holding_its_context() -> None:
 
 def test_valid_reply_updates_confidence_and_tier() -> None:
     llm = FakeLLMClient(reply([
-        {"id": 1, "verdict": "cut", "confidence": 0.95, "reason": "hesitation"},
+        {"id": 1, "verdict": "keep", "confidence": 0.2, "reason": "unsure keep"},
         {"id": 2, "verdict": "cut", "confidence": 0.9, "reason": "repeat"},
-        {"id": 3, "verdict": "keep", "confidence": 0.9, "reason": "question particle"},
+        {"id": 3, "verdict": "cut", "confidence": 0.95, "reason": "hesitation"},
         {"id": 99, "verdict": "cut", "confidence": 1.0, "reason": "unknown id"},
     ]))  # fmt: skip
     out = review(WORDS, ROWS, llm, CFG, sure_min=0.7)
     assert [(u[0], u[1], u[2], u[3]) for u in out.updates] == [
-        (1, 0.93, "sure", "cut"), (2, 0.86, "sure", "cut"), (3, 0.3, "unsure", "keep"),
+        (1, 0.69, "unsure", "keep"),  # any keep demotes a sure cut
+        (2, 0.8, "sure", "cut"),  # a cut keeps the rule confidence
+        (3, 0.6, "unsure", "cut"),  # ... and never lifts an unsure "à" to sure
     ]  # fmt: skip
     assert out.ignored == 1 and out.requests == 1
     assert (out.input_tokens, out.output_tokens) == (100, 20)
@@ -343,8 +347,9 @@ def test_llm_retakes_become_new_cuts_and_bad_ones_are_dropped() -> None:
         2.0,
         "retake",
         "llm",
-        "sure",
+        "unsure",
     )
+    assert cut.confidence == 0.69  # LLM retakes enter as unsure
     assert why == "restarted" and out.ignored == 3
 
 
@@ -368,18 +373,18 @@ def test_long_transcript_is_sent_in_overlapping_chunks() -> None:
 prob = st.floats(min_value=0, max_value=1, allow_nan=False)
 
 
-@given(prob, prob, prob)
-def test_combine_bounds_and_keep_never_beats_cut(rule: float, c: float, w: float) -> None:
-    cut, keep = combine(rule, "cut", c, w), combine(rule, "keep", c, w)
-    assert 0 <= keep <= 1 and 0 <= cut <= 1
-    if c >= 0.5:
-        assert keep <= cut + 1e-9  # a confident "keep" never raises it above the "cut" verdict
+@given(prob, prob, prob, st.floats(min_value=0.5, max_value=0.9))
+def test_combine_only_lowers_and_keep_is_always_unsure(
+    rule: float, c: float, w: float, sure_min: float
+) -> None:
+    cut, keep = combine(rule, "cut", c, w, sure_min), combine(rule, "keep", c, w, sure_min)
+    assert cut == round(rule, 3)  # a "cut" verdict changes nothing
+    assert 0 <= keep <= round(rule, 3) and keep < sure_min
 
 
-@given(prob, prob)
-def test_combine_extremes_of_weight(rule: float, c: float) -> None:
-    assert combine(rule, "cut", c, 0.0) == round(rule, 3)  # weight 0: rules only
-    assert combine(rule, "keep", c, 1.0) == round(1 - c, 3)  # weight 1: LLM only
+def test_combine_keep_blends_with_the_rule() -> None:
+    assert combine(0.6, "keep", 0.9, 0.6, 0.7) == 0.3  # 0.4 * 0.6 + 0.6 * 0.1
+    assert combine(0.9, "keep", 0.2, 0.6, 0.7) == 0.69  # blend 0.84, capped below sure
 
 
 @given(st.lists(st.tuples(st.sampled_from(["cut", "keep"]), prob), min_size=1, max_size=5))

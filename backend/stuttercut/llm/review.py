@@ -2,17 +2,20 @@
 
 What is sent (ADR 0001): the verbatim words with their indices, and each candidate as a word
 range, or "after word i" for wordless ones (a pause, or a sound the voice detector heard but
-the transcript has no word for), with its reason, source and rule confidence. No
-timestamps, audio, file paths or clip names. Long transcripts go in overlapping chunks.
+the transcript has no word for), with the detector's reason, its source and the transcript
+words in and around it. No rule confidence (it anchored the model to "cut"), timestamps,
+audio, file paths or clip names. Long transcripts go in overlapping chunks.
 
-Combining (documented in docs/lessons and the PR):
-    p_cut = c            if the LLM says "cut" with confidence c
-          = 1 - c        if it says "keep"
-    final = (1 - w) * rule_confidence + w * p_cut          (w = STUTTERCUT_LLM_WEIGHT, 0.6)
-    tier  = "sure" if final >= STUTTERCUT_TIER_SURE_MIN (0.7) else "unsure"
-A "keep" verdict lowers the confidence but never removes the candidate: the human decides.
-Retakes the LLM finds become new cuts (source=llm) with the LLM's confidence, unless they
-duplicate an existing candidate (> 50% overlap).
+Combining is asymmetric: the LLM can only lower confidence, never raise a cut to "sure"
+(an 8B model calls meaningful "à"/"ừ" hesitations, so its "cut" is not trusted).
+    "cut" with confidence c:  final = rule_confidence                  (unchanged)
+    "keep" with confidence c: final = min(rule_confidence,
+                                          (1 - w) * rule_confidence + w * (1 - c),
+                                          sure_min - 0.01)             (always "unsure")
+    (w = STUTTERCUT_LLM_WEIGHT 0.6, sure_min = STUTTERCUT_TIER_SURE_MIN 0.7)
+A "keep" verdict demotes the candidate but never removes it: the human decides.
+Retakes the LLM finds become new cuts (source=llm), always "unsure" (confidence capped at
+sure_min - 0.01), unless they duplicate an existing candidate (> 50% overlap).
 """
 
 import json
@@ -32,25 +35,41 @@ log = logging.getLogger(__name__)
 _EPS = 0.01
 
 SYSTEM_PROMPT = """\
-You review automatic cut suggestions for a Vietnamese video editor that removes stutters.
-You get a verbatim Vietnamese transcript (one word per line, "index<TAB>word"; [UH] and [UM]
-mark hesitation sounds) and candidate cuts found by rules or a voice detector. A candidate
-covers "words" [first, last], or has no words: "silence_after_word" i is a pause after word i;
-"unwritten_sound_after_word" i is a sound the voice detector heard after word i that the
-transcript has no word for (often a hesitation the transcriber skipped).
+You check cut suggestions for a Vietnamese video editor. A detector marked possible stutters
+("detector_guess": filler, repeat, retake, pause) in a verbatim transcript; it is often wrong,
+and cutting a word that carries meaning ruins the sentence. Judge each candidate in its
+sentence.
 
-For EVERY candidate, decide in context whether removing it keeps the meaning and sounds
-natural:
-- "cut": a hesitation (ờ, ừm, [UH], [UM]), an earlier copy of a repeated word or phrase
-  ("tôi tôi sẽ" -> cut the first "tôi"), a false start, or a long silence.
-- "keep": the words carry meaning, e.g. "à" as a particle ("vậy à", "à, ra vậy"), "ừ" as a
-  real answer, an intentional repetition for emphasis, or a short natural pause.
-Give a confidence from 0 to 1 and a short reason (under 15 words, English).
+Transcript: one word per line, "index<TAB>word"; [UH] and [UM] are hesitation sounds.
+A candidate covers "words" [first, last] ("text" is those words), or has no words:
+"silence_after_word" i is a pause after word i; "unwritten_sound_after_word" i is a sound
+after word i that the transcript has no word for. "context" shows the candidate between
+>> << (~ for a wordless one) with the words around it.
 
-Also list RETAKES the rules missed: an abandoned attempt that the speaker restarts right
-after ("bài đầu tiên chúng ta ... [UH] bài đầu tiên là ..."). Return the word-index range of
-the abandoned attempt only (not the restart), with a confidence and a short reason. Return an
-empty list when there are none. Use only indices shown in this chunk.
+For each candidate write the reason FIRST: what the candidate does in this sentence (under 15
+words, English). Then the verdict and a confidence from 0 to 1.
+
+"keep" when the candidate carries meaning:
+- a particle or interjection: a sentence-final question or politeness particle ("thật à",
+  "vậy hả", "được không ạ"), an interjection that opens a thought ("à, nhớ rồi"), or an answer
+  or agreement ("ừ, được", "ờ, phải").
+- a Vietnamese reduplicated word or deliberate doubling ("mãi mãi", "ngày ngày",
+  "nhiều nhiều", "đi đi").
+- a phrase that starts like the next one but says something new and complete (lists,
+  contrasts: "cái này màu đỏ, cái này màu xanh").
+- a wordless sound right at the end of a question or at the start of a reaction (probably an
+  unwritten particle).
+"cut" when removing it loses nothing:
+- a hesitation: [UH], [UM], ờ, ừm, or à/ừ in the middle of a phrase before the next content
+  word.
+- the first copy of an accidental repeat ("tôi tôi sẽ" -> the first "tôi").
+- an abandoned or corrected start that the speaker restarts ("hôm nay chúng ta [UH] hôm nay
+  mình sẽ" -> "hôm nay chúng ta").
+- a wordless sound or long silence in the middle of a phrase.
+
+Also list RETAKES with no candidate: an abandoned or corrected start that the speaker restarts
+right after. Return the word-index range of the abandoned part only (not the restart), with a
+confidence and a short reason; an empty list when there are none. Use only indices shown.
 """
 
 SCHEMA: dict[str, Any] = {
@@ -60,11 +79,11 @@ SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {
+                "properties": {  # reason first: the model explains, then decides
                     "id": {"type": "integer"},
+                    "reason": {"type": "string"},
                     "verdict": {"type": "string", "enum": ["cut", "keep"]},
                     "confidence": {"type": "number"},
-                    "reason": {"type": "string"},
                 },
                 "required": ["id", "verdict", "confidence", "reason"],
                 "additionalProperties": False,
@@ -154,10 +173,19 @@ class ReviewOutcome:
         )
 
 
-def combine(rule_confidence: float, verdict: str, llm_confidence: float, weight: float) -> float:
-    """Final confidence in [0, 1] (formula in the module docstring)."""
-    p_cut = llm_confidence if verdict == "cut" else 1 - llm_confidence
-    return round(min(1.0, max(0.0, (1 - weight) * rule_confidence + weight * p_cut)), 3)
+def combine(
+    rule_confidence: float, verdict: str, llm_confidence: float, weight: float, sure_min: float
+) -> float:
+    """Final confidence in [0, 1]; the LLM can only lower it (formula in the module docstring)."""
+    if verdict == "cut":
+        return round(rule_confidence, 3)
+    blended = (1 - weight) * rule_confidence + weight * (1 - llm_confidence)
+    return round(max(0.0, min(rule_confidence, blended, _below(sure_min))), 3)
+
+
+def _below(sure_min: float) -> float:
+    """Highest confidence that is still tier "unsure"."""
+    return sure_min - 0.01
 
 
 def chunk_ranges(n_words: int, size: int, overlap: int) -> list[tuple[int, int]]:
@@ -213,18 +241,20 @@ def build_prompt(words: list[Word], rng: tuple[int, int], candidates: list[Candi
     lines += [f"{i}\t{words[i].text}" for i in range(s, e)]
     lines += ["", "Candidates (one JSON object per line):"]
     for c in candidates:
-        where: dict[str, Any] = (
-            {"words": [c.first, c.last]}
-            if c.first is not None
-            else {
-                "silence_after_word"
-                if c.reason == "pause"
-                else "unwritten_sound_after_word": c.after
-            }
-        )
-        lines.append(json.dumps({"id": c.id, "reason": c.reason, "source": c.source,
-                                 "rule_confidence": c.rule_confidence, **where},
-                                ensure_ascii=False))  # fmt: skip
+        d: dict[str, Any] = {"id": c.id, "detector_guess": c.reason, "source": c.source}
+        if c.first is not None and c.last is not None:
+            lo, hi = c.first, c.last + 1
+            d["words"] = [c.first, c.last]
+            d["text"] = " ".join(w.text for w in words[lo:hi])
+        else:
+            lo = hi = c.after + 1
+            key = "silence_after_word" if c.reason == "pause" else "unwritten_sound_after_word"
+            d[key] = c.after
+        # an 8B model looks words up by index poorly, so show them in place (4 words each side)
+        before = " ".join(w.text for w in words[max(0, lo - 4) : lo])
+        after = " ".join(w.text for w in words[hi : hi + 4])
+        d["context"] = f"{before} >>{d.get('text', '~')}<< {after}".strip()
+        lines.append(json.dumps(d, ensure_ascii=False))
     if not candidates:
         lines.append("(none in this chunk; only look for retakes)")
     return "\n".join(lines)
@@ -267,7 +297,7 @@ def review(
             if cand is None:
                 outcome.ignored += 1
                 continue
-            final = combine(cand.rule_confidence, v.verdict, v.confidence, cfg.weight)
+            final = combine(cand.rule_confidence, v.verdict, v.confidence, cfg.weight, sure_min)
             outcome.updates.append(
                 (cand.id, final, tier(final, sure_min), v.verdict, v.confidence, v.reason[:200])
             )
@@ -280,7 +310,8 @@ def review(
             retakes.add((r.first_word, r.last_word))
             nxt = r.last_word + 1
             end = words[nxt].start if nxt < len(words) else words[r.last_word].end
-            cut = Cut(words[r.first_word].start, end, "retake", "llm", round(r.confidence, 3))
+            conf = round(min(r.confidence, _below(sure_min)), 3)  # LLM retakes enter as unsure
+            cut = Cut(words[r.first_word].start, end, "retake", "llm", conf)
             if _duplicates(cut, rows):
                 outcome.ignored += 1
                 continue

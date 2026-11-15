@@ -221,7 +221,7 @@ def _llm_judges_all(prompt: str) -> str:
     for line in prompt.splitlines():
         if line.startswith("{"):
             cand = json.loads(line)
-            keep = cand["reason"] == "filler"
+            keep = cand["detector_guess"] == "filler"
             verdicts.append({"id": cand["id"], "verdict": "keep" if keep else "cut",
                              "confidence": 0.9, "reason": "test"})  # fmt: skip
     retakes = [{"first_word": 5, "last_word": 6, "confidence": 0.8, "reason": "restart"}]

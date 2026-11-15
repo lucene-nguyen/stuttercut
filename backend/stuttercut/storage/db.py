@@ -55,6 +55,20 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX cut_job ON cut(job_id);
     """,
+    # 3: LLM review (LEARNING-208). confidence becomes the final confidence; the rule's own
+    # stays in rule_confidence (NULL for cuts the LLM proposed).
+    """
+    ALTER TABLE cut ADD COLUMN tier TEXT NOT NULL DEFAULT 'unsure'
+        CHECK (tier IN ('sure', 'unsure'));
+    ALTER TABLE cut ADD COLUMN rule_confidence REAL;
+    ALTER TABLE cut ADD COLUMN llm_verdict TEXT CHECK (llm_verdict IN ('cut', 'keep'));
+    ALTER TABLE cut ADD COLUMN llm_confidence REAL;
+    ALTER TABLE cut ADD COLUMN llm_reason TEXT;
+    UPDATE cut SET rule_confidence = confidence;
+    ALTER TABLE job ADD COLUMN llm_input_tokens INTEGER;
+    ALTER TABLE job ADD COLUMN llm_output_tokens INTEGER;
+    ALTER TABLE job ADD COLUMN llm_cost_usd REAL;
+    """,
 ]
 
 

@@ -141,6 +141,8 @@ class ReviewOutcome:
     ignored: int = 0  # verdicts for unknown ids, out-of-range retakes, duplicates
 
     def cost_usd(self, cfg: LlmConfig) -> float:
+        if cfg.provider == "ollama":
+            return 0.0  # local model
         return round(
             self.input_tokens / 1e6 * cfg.price_in_per_mtok
             + self.output_tokens / 1e6 * cfg.price_out_per_mtok,

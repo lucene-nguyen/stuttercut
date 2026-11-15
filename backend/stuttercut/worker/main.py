@@ -48,12 +48,17 @@ def load_vad(cfg: Config) -> VoiceDetector | None:
 
 
 def load_llm(cfg: Config) -> LLMClient | None:
-    """The review LLM when STUTTERCUT_LLM_ENABLED=true and a key is set; else None (rules-only)."""
+    """The review LLM when STUTTERCUT_LLM_ENABLED=true; None means rules-only.
+
+    ollama (default) needs no key; if Ollama is not running, each review fails and falls back.
+    anthropic needs LLM_API_KEY.
+    """
     if not cfg.llm.enabled:
         return None
-    if cfg.llm.provider != "anthropic":
-        log.warning("unknown LLM provider; LLM review is off", extra={"provider": cfg.llm.provider})
-        return None
+    if cfg.llm.provider == "ollama":
+        from stuttercut.llm.ollama_client import OllamaClient
+
+        return OllamaClient(cfg.llm)
     from stuttercut.llm.anthropic_client import AnthropicClient
 
     try:

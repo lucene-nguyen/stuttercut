@@ -1,6 +1,9 @@
 """LLM review: client contract, parsing, chunking, merge/tier logic. No network."""
 
+import io
 import json
+import urllib.error
+from email.message import Message
 from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +19,7 @@ from stuttercut.config import LlmConfig
 from stuttercut.llm import LLMError, LLMTimeout
 from stuttercut.llm.anthropic_client import FALLBACK_BETA, AnthropicClient
 from stuttercut.llm.fake import FakeLLMClient
+from stuttercut.llm.ollama_client import OllamaClient
 from stuttercut.llm.review import (
     SCHEMA,
     InvalidReply,
@@ -28,6 +32,7 @@ from stuttercut.llm.review import (
 )
 
 CFG = LlmConfig(enabled=True, api_key="test-key", chunk_words=8, chunk_overlap_words=3)
+CLAUDE = LlmConfig(enabled=True, provider="anthropic", api_key="test-key")
 
 
 def words(*texts: str) -> list[Word]:
@@ -78,7 +83,7 @@ def response(text: str, stop: str = "end_turn") -> Any:
 
 def test_anthropic_request_shape_and_usage() -> None:
     sdk = FakeSdk(response('{"verdicts": [], "retakes": []}'))
-    out = AnthropicClient(CFG, sdk=sdk).complete("system text", "0\ttôi", SCHEMA)
+    out = AnthropicClient(CLAUDE, sdk=sdk).complete("system text", "0\ttôi", SCHEMA)
     assert (out.text, out.input_tokens, out.output_tokens) == (
         '{"verdicts": [], "retakes": []}',
         1200,
@@ -98,20 +103,96 @@ def test_anthropic_request_shape_and_usage() -> None:
 def test_anthropic_errors_map_to_llm_errors() -> None:
     req = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     with pytest.raises(LLMTimeout):
-        AnthropicClient(CFG, sdk=FakeSdk(anthropic.APITimeoutError(request=req))).complete(
+        AnthropicClient(CLAUDE, sdk=FakeSdk(anthropic.APITimeoutError(request=req))).complete(
             "s", "p", SCHEMA
         )
     with pytest.raises(LLMError, match="connection"):
-        AnthropicClient(CFG, sdk=FakeSdk(anthropic.APIConnectionError(request=req))).complete(
+        AnthropicClient(CLAUDE, sdk=FakeSdk(anthropic.APIConnectionError(request=req))).complete(
             "s", "p", SCHEMA
         )
     with pytest.raises(LLMError, match="refusal"):
-        AnthropicClient(CFG, sdk=FakeSdk(response("", stop="refusal"))).complete("s", "p", SCHEMA)
+        AnthropicClient(CLAUDE, sdk=FakeSdk(response("", stop="refusal"))).complete(
+            "s", "p", SCHEMA
+        )
 
 
 def test_anthropic_needs_a_key() -> None:
     with pytest.raises(LLMError, match="LLM_API_KEY"):
-        AnthropicClient(LlmConfig(enabled=True, api_key=""))
+        AnthropicClient(LlmConfig(enabled=True, provider="anthropic", api_key=""))
+
+
+# --- Ollama client contract ------------------------------------------------------------------
+
+
+class FakePost:
+    def __init__(self, result: dict[str, Any] | Exception) -> None:
+        self.result = result
+        self.calls: list[tuple[str, dict[str, Any], float]] = []
+
+    def __call__(self, url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        self.calls.append((url, payload, timeout))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def test_ollama_request_shape_and_usage() -> None:
+    text = '{"verdicts": [], "retakes": []}'
+    post = FakePost({"message": {"role": "assistant", "content": text}, "done_reason": "stop",
+                     "prompt_eval_count": 900, "eval_count": 40})  # fmt: skip
+    client = OllamaClient(CFG, post=post)
+    out = client.complete("system text", "0	tôi", SCHEMA)
+    assert (out.text, out.input_tokens, out.output_tokens) == (
+        '{"verdicts": [], "retakes": []}', 900, 40,
+    )  # fmt: skip
+    ((url, payload, timeout),) = post.calls
+    assert url == "http://127.0.0.1:11434/api/chat" and timeout == 30.0
+    assert client.model == payload["model"] == "qwen3:8b"
+    assert payload["messages"] == [
+        {"role": "system", "content": "system text"},
+        {"role": "user", "content": "0	tôi"},
+    ]  # text only
+    assert payload["format"] == SCHEMA and payload["stream"] is False and payload["think"] is False
+    assert payload["options"]["temperature"] == 0 and payload["options"]["num_ctx"] == 8192
+
+
+@pytest.mark.parametrize(
+    ("error", "kind", "match"),
+    [
+        (TimeoutError("timed out"), LLMTimeout, "30 s"),
+        (urllib.error.URLError(TimeoutError("timed out")), LLMTimeout, "30 s"),
+        (urllib.error.URLError(ConnectionRefusedError(10061, "refused")), LLMError, "reach Ollama"),
+        (urllib.error.HTTPError("u", 404, "nf", Message(), io.BytesIO(b'{"error":"not found"}')),
+         LLMError, "ollama pull qwen3:8b"),
+    ],
+)  # fmt: skip
+def test_ollama_errors_map_to_llm_errors(error: Exception, kind: type, match: str) -> None:
+    with pytest.raises(kind, match=match):
+        OllamaClient(CFG, post=FakePost(error)).complete("s", "p", SCHEMA)
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, None),  # disabled
+        ({"STUTTERCUT_LLM_ENABLED": "true"}, "OllamaClient"),  # local: no key needed
+        ({"STUTTERCUT_LLM_ENABLED": "true", "STUTTERCUT_LLM_PROVIDER": "anthropic"}, None),
+    ],
+)
+def test_load_llm_picks_the_provider(env: dict[str, str], expected: str | None) -> None:
+    from pathlib import Path
+
+    from stuttercut.config import load_config
+    from stuttercut.worker.main import load_llm
+
+    llm = load_llm(load_config(env=env, dotenv=Path("missing.env")))
+    assert (type(llm).__name__ if llm else None) == expected
+
+
+def test_ollama_truncated_reply_is_an_error() -> None:
+    post = FakePost({"message": {"content": '{"verdicts": ['}, "done_reason": "length"})
+    with pytest.raises(LLMError, match="8000 tokens"):
+        OllamaClient(CFG, post=post).complete("s", "p", SCHEMA)
 
 
 # --- chunking and request ----------------------------------------------------------------------
@@ -167,7 +248,8 @@ def test_valid_reply_updates_confidence_and_tier() -> None:
     ]  # fmt: skip
     assert out.ignored == 1 and out.requests == 1
     assert (out.input_tokens, out.output_tokens) == (100, 20)
-    assert out.cost_usd(CFG) == round(100 / 1e6 * 2 + 20 / 1e6 * 10, 5)
+    assert out.cost_usd(CLAUDE) == round(100 / 1e6 * 2 + 20 / 1e6 * 10, 5)
+    assert out.cost_usd(CFG) == 0.0  # ollama: local, free
 
 
 def test_malformed_reply_is_retried_once() -> None:

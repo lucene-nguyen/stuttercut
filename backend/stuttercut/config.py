@@ -104,23 +104,40 @@ def _bool(raw: str) -> bool:
     raise ValueError(raw)
 
 
+LLM_PROVIDERS = ("ollama", "anthropic")
+# qwen3:8b: strong Vietnamese (119-language pretraining) and JSON, q4 fits 8 GB VRAM / 16 GB Mac
+DEFAULT_MODELS = {"ollama": "qwen3:8b", "anthropic": "claude-sonnet-5-5"}
+
+
 @dataclass(frozen=True)
 class LlmConfig:
     """LLM review of cut candidates (LEARNING-208). Only transcript text is sent (ADR 0001)."""
 
-    enabled: bool = False  # off until a key is configured
-    provider: str = "anthropic"
-    model: str = "claude-sonnet-5-5"
+    enabled: bool = False  # opt-in: needs Ollama running, or an API key for anthropic
+    provider: str = "ollama"  # ollama (local, nothing leaves the machine) | anthropic
+    model: str = ""  # empty = DEFAULT_MODELS[provider]
     api_key: str = field(default="", repr=False)  # LLM_API_KEY in .env; never logged
-    effort: str = "medium"  # output_config.effort: low | medium | high
+    effort: str = "medium"  # anthropic output_config.effort: low | medium | high
+    ollama_url: str = "http://127.0.0.1:11434"
+    num_ctx: int = 8192  # ollama context window (tokens); a 300-word chunk needs ~2-3k
+    keep_alive: str = "1m"  # ollama keeps the model loaded this long after a request
+    unload_asr_below_gb: float = 8.0  # local LLM: free the ASR model first when free RAM is lower
     timeout_s: float = 30.0
     max_tokens: int = 8000
     chunk_words: int = 300
     chunk_overlap_words: int = 40
     weight: float = 0.6  # final = (1 - weight) * rule confidence + weight * LLM cut probability
-    price_in_per_mtok: float = 2.0  # USD, for the cost estimate in logs (Sonnet 5.5)
+    price_in_per_mtok: float = 2.0  # USD (Sonnet 5.5), for the cost estimate; ollama costs 0
     price_out_per_mtok: float = 10.0
     prompt_file: Path | None = None  # optional override of the built-in system prompt
+
+    def __post_init__(self) -> None:
+        if self.provider not in LLM_PROVIDERS:
+            raise ValueError(
+                f"STUTTERCUT_LLM_PROVIDER must be one of {LLM_PROVIDERS}, got {self.provider!r}"
+            )
+        if not self.model:
+            object.__setattr__(self, "model", DEFAULT_MODELS[self.provider])
 
 
 @dataclass(frozen=True)
@@ -188,6 +205,10 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_LLM_PRICE_IN_PER_MTOK": ("llm", "price_in_per_mtok", float),
     "STUTTERCUT_LLM_PRICE_OUT_PER_MTOK": ("llm", "price_out_per_mtok", float),
     "STUTTERCUT_LLM_PROMPT_FILE": ("llm", "prompt_file", Path),
+    "STUTTERCUT_OLLAMA_URL": ("llm", "ollama_url", str),
+    "STUTTERCUT_LLM_NUM_CTX": ("llm", "num_ctx", int),
+    "STUTTERCUT_LLM_KEEP_ALIVE": ("llm", "keep_alive", str),
+    "STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB": ("llm", "unload_asr_below_gb", float),
 }
 
 

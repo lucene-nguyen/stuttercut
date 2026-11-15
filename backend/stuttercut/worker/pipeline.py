@@ -2,7 +2,8 @@
 
 llm_review runs only when an LLM client is given (STUTTERCUT_LLM_ENABLED=true). With the local
 provider (ollama) and free RAM below STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB, the ASR model is
-unloaded first (span unload_asr) and loaded again before the next transcribe (span load_model):
+unloaded first (span unload_asr; on CUDA the test is free VRAM < STUTTERCUT_LLM_EXPECTED_GB +
+STUTTERCUT_LLM_VRAM_MARGIN_GB) and loaded again before the next transcribe (span load_model):
 the two models never sit in memory together on a 16 GB Mac. If the review fails, the job
 keeps its rules-only cuts and tiers: WARN log, span error, still ready_for_review
 (design: "LLM fails -> rules-only").
@@ -17,14 +18,14 @@ import sqlite3
 from pathlib import Path
 
 from stuttercut.asr import Transcriber, Unloadable
-from stuttercut.config import Config
+from stuttercut.config import Config, LlmConfig
 from stuttercut.llm import LLMClient
 from stuttercut.llm.review import review
 from stuttercut.media.audio import MediaError, extract_audio
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.observability.spans import span
-from stuttercut.platform import free_ram_gb
+from stuttercut.platform import free_ram_gb, free_vram_gb
 from stuttercut.rules import Interval
 from stuttercut.rules.detect import detect
 from stuttercut.storage import paths, repo
@@ -88,26 +89,44 @@ def _llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClie
     )  # fmt: skip
 
 
+def should_unload_asr(
+    device: str, free_ram: float, free_vram: float | None, cfg: LlmConfig
+) -> bool:
+    """CUDA: the LLM must fit in free VRAM with a margin. MPS/CPU (shared memory): free RAM."""
+    if device == "cuda" and free_vram is not None:
+        return free_vram < cfg.expected_gb + cfg.vram_margin_gb
+    return free_ram < cfg.unload_asr_below_gb
+
+
 def _free_asr_for_local_llm(
     conn: sqlite3.Connection, cfg: Config, job_id: str, transcriber: Transcriber
 ) -> None:
     if cfg.llm.provider != "ollama" or not isinstance(transcriber, Unloadable):
         return
-    free = free_ram_gb()
-    if not transcriber.loaded or free >= cfg.llm.unload_asr_below_gb:
+    if not transcriber.loaded:
+        return
+    ram = free_ram_gb()
+    vram = free_vram_gb() if transcriber.device == "cuda" else None
+    if not should_unload_asr(transcriber.device, ram, vram, cfg.llm):
         return
     with span(conn, job_id, "unload_asr"):
         transcriber.unload()
+    vram_after = free_vram_gb() if vram is not None else None
     log.info(
         "ASR model unloaded before the local LLM",
-        extra={"job_id": job_id, "free_ram_gb": round(free, 1),
+        extra={"job_id": job_id, "device": transcriber.device, "free_ram_gb": round(ram, 1),
                "free_ram_gb_after": round(free_ram_gb(), 1),
-               "threshold_gb": cfg.llm.unload_asr_below_gb},
+               "free_vram_gb": None if vram is None else round(vram, 1),
+               "free_vram_gb_after": None if vram_after is None else round(vram_after, 1)},
     )  # fmt: skip
 
 
 def _try_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClient) -> None:
     try:
+        warm = getattr(llm, "warm", None)  # local model: load it under its own, longer timeout
+        if warm is not None:
+            with span(conn, job_id, "llm_load"):
+                warm()
         with span(conn, job_id, "llm_review"):
             _llm_review(conn, cfg, job_id, llm)
     except Exception:  # never fails the job: rules-only cuts stay

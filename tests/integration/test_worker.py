@@ -331,3 +331,25 @@ def test_local_llm_is_released_after_review_even_when_it_fails(
     job_id = repo.create_job(conn, str(make_video()))
     assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, llm) == "ready_for_review"
     assert released == [True]
+
+
+def test_local_llm_load_failure_skips_review_and_keeps_rules(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    from stuttercut.llm import LLMTimeout
+    from stuttercut.llm.fake import FakeLLMClient
+
+    released: list[bool] = []
+    llm = FakeLLMClient(_llm_judges_all)
+
+    def warm() -> None:
+        raise LLMTimeout("model not loaded within 120 s")
+
+    llm.warm = warm  # type: ignore[attr-defined]
+    llm.release = lambda: released.append(True)  # type: ignore[attr-defined]
+    job_id = repo.create_job(conn, str(make_video()))
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, llm) == "ready_for_review"
+    steps = spans(conn, job_id)
+    assert steps[-1] == ("llm_load", "error") and "llm_review" not in [s for s, _ in steps]
+    assert llm.calls == [] and released == [True]
+    assert repo.cut_counts(conn, job_id, "tier") == {"sure": 2}

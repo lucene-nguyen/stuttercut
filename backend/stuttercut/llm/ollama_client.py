@@ -59,6 +59,23 @@ class OllamaClient:
                 return round(m.get("size", 0) / 2**20), round(m.get("size_vram", 0) / 2**20)
         return None
 
+    def warm(self) -> None:
+        """Load the model (empty prompt) under load_timeout_s, so chunks get the 30 s budget.
+
+        Same num_ctx as the chunks, or Ollama would load the model a second time.
+        """
+        payload = {"model": self._cfg.model, "keep_alive": self._cfg.keep_alive,
+                   "options": {"num_ctx": self._cfg.num_ctx}}  # fmt: skip
+        try:
+            self._post(self._base + "/api/generate", payload, self._cfg.load_timeout_s)
+        except TimeoutError as e:
+            raise LLMTimeout(f"model not loaded within {self._cfg.load_timeout_s:.0f} s") from e
+        except urllib.error.HTTPError as e:
+            hint = f" (run: ollama pull {self._cfg.model})" if e.code == 404 else ""
+            raise LLMError(f"Ollama error {e.code} loading {self._cfg.model}{hint}") from e
+        except urllib.error.URLError as e:
+            raise LLMError(f"cannot reach Ollama at {self._cfg.ollama_url}: {e.reason}") from e
+
     def release(self) -> None:
         """Unload the model now (keep_alive 0) so the next job's ASR gets the memory."""
         try:

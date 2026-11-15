@@ -119,13 +119,16 @@ class LlmConfig:
     api_key: str = field(default="", repr=False)  # LLM_API_KEY in .env; never logged
     effort: str = "medium"  # anthropic output_config.effort: low | medium | high
     ollama_url: str = "http://127.0.0.1:11434"
-    num_ctx: int = 8192  # ollama context window (tokens): one chunk + system prompt + reply
+    num_ctx: int = 6144  # ollama: one chunk + prompt + reply; c001 peak 2.6k (local-llm.md)
     keep_alive: str = "30s"  # bridges chunk requests; the model is unloaded after llm_review
-    unload_asr_below_gb: float = 8.0  # local LLM: free the ASR model first when free RAM is lower
-    timeout_s: float = 30.0
+    unload_asr_below_gb: float = 8.0  # local LLM, MPS/CPU: free the ASR model below this free RAM
+    expected_gb: float = 6.0  # local LLM size in memory (weights + KV cache at num_ctx)
+    vram_margin_gb: float = 1.0  # CUDA: free the ASR model when free VRAM < expected + margin
+    load_timeout_s: float = 120.0  # loading the local model before the first chunk
+    timeout_s: float = 30.0  # per chunk request
     max_tokens: int = 8000
-    chunk_words: int = 300
-    chunk_overlap_words: int = 40
+    chunk_words: int = 150  # keeps a local 8B chunk well under timeout_s (~0.9 s per candidate)
+    chunk_overlap_words: int = 30
     weight: float = 0.6  # final = (1 - weight) * rule confidence + weight * LLM cut probability
     price_in_per_mtok: float = 2.0  # USD (Sonnet 5.5), for the cost estimate; ollama costs 0
     price_out_per_mtok: float = 10.0
@@ -209,6 +212,9 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_LLM_NUM_CTX": ("llm", "num_ctx", int),
     "STUTTERCUT_LLM_KEEP_ALIVE": ("llm", "keep_alive", str),
     "STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB": ("llm", "unload_asr_below_gb", float),
+    "STUTTERCUT_LLM_EXPECTED_GB": ("llm", "expected_gb", float),
+    "STUTTERCUT_LLM_VRAM_MARGIN_GB": ("llm", "vram_margin_gb", float),
+    "STUTTERCUT_LLM_LOAD_TIMEOUT_S": ("llm", "load_timeout_s", float),
 }
 
 

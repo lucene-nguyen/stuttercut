@@ -157,7 +157,7 @@ def test_ollama_request_shape_and_usage() -> None:
         {"role": "user", "content": "0	tôi"},
     ]  # text only
     assert payload["format"] == SCHEMA and payload["stream"] is False and payload["think"] is False
-    assert payload["options"]["temperature"] == 0 and payload["options"]["num_ctx"] == 8192
+    assert payload["options"]["temperature"] == 0 and payload["options"]["num_ctx"] == 6144
 
 
 @pytest.mark.parametrize(
@@ -195,7 +195,7 @@ def test_load_llm_picks_the_provider(env: dict[str, str], expected: str | None) 
 
 def test_ollama_full_context_is_an_error_not_a_silent_truncation() -> None:
     post = FakePost({"message": {"content": "{}"}, "done_reason": "stop",
-                     "prompt_eval_count": 8100, "eval_count": 92})  # fmt: skip
+                     "prompt_eval_count": 6100, "eval_count": 44})  # fmt: skip
     with pytest.raises(LLMError, match="STUTTERCUT_LLM_NUM_CTX"):
         OllamaClient(CFG, post=post, get=NO_PS).complete("s", "p", SCHEMA)
 
@@ -209,6 +209,33 @@ def test_ollama_release_unloads_and_peak_memory_is_tracked() -> None:
     assert client.peak_resident_mb == (6144, 5120)
     url, payload, _ = post.calls[-1]
     assert url.endswith("/api/generate") and payload == {"model": "qwen3:8b", "keep_alive": 0}
+
+
+def test_ollama_warm_loads_with_the_chunk_context_and_its_own_timeout() -> None:
+    post = FakePost({"done": True, "load_duration": 4_000_000_000})
+    OllamaClient(CFG, post=post, get=NO_PS).warm()
+    ((url, payload, timeout),) = post.calls
+    assert url.endswith("/api/generate") and timeout == 120.0
+    assert payload["options"] == {"num_ctx": 6144} and "prompt" not in payload
+    with pytest.raises(LLMTimeout, match="120 s"):
+        OllamaClient(CFG, post=FakePost(TimeoutError()), get=NO_PS).warm()
+
+
+@pytest.mark.parametrize(
+    ("device", "ram", "vram", "unload"),
+    [
+        ("cuda", 20.0, 3.4, True),  # RTX 4060 with CrisperWhisper large loaded
+        ("cuda", 20.0, 7.5, False),  # 6 GB model + 1 GB margin fits
+        ("cuda", 4.0, 7.5, False),  # on CUDA, VRAM decides
+        ("cuda", 4.0, None, True),  # no VRAM reading: fall back to the RAM rule
+        ("mps", 5.0, None, True),  # 16 GB Mac under pressure
+        ("cpu", 12.0, None, False),
+    ],
+)
+def test_should_unload_asr(device: str, ram: float, vram: float | None, unload: bool) -> None:
+    from stuttercut.worker.pipeline import should_unload_asr
+
+    assert should_unload_asr(device, ram, vram, CFG) is unload
 
 
 def test_ollama_truncated_reply_is_an_error() -> None:
@@ -243,7 +270,9 @@ def test_candidates_by_word_index_and_prompt_has_no_times_or_paths() -> None:
         (1, 0, 0, -1), (2, 1, 1, 0), (3, 6, 6, 5), (4, None, None, 4),
     ]  # fmt: skip
     prompt = build_prompt(WORDS, (0, 7), cands)
-    assert "0\t[UH]" in prompt and '"silence_after_word": 4' in prompt
+    assert "0\t[UH]" in prompt and '"silence_after_word": 4' in prompt  # pause
+    vad = build_prompt(WORDS, (0, 7), to_candidates([row(5, 2.42, 2.48, "filler", "vad")], WORDS))
+    assert '"unwritten_sound_after_word": 4' in vad and "silence_after" not in vad
     for forbidden in ("0.4", "3.0", "start_s", ".mp4", "C:/", "c001"):
         assert forbidden not in prompt
 

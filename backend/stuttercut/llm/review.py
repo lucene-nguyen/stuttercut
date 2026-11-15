@@ -1,7 +1,8 @@
 """LLM review of cut candidates: judge each candidate in context, find retakes (LEARNING-208).
 
 What is sent (ADR 0001): the verbatim words with their indices, and each candidate as a word
-range (or "after word i" for silent ones) with its reason, source and rule confidence. No
+range, or "after word i" for wordless ones (a pause, or a sound the voice detector heard but
+the transcript has no word for), with its reason, source and rule confidence. No
 timestamps, audio, file paths or clip names. Long transcripts go in overlapping chunks.
 
 Combining (documented in docs/lessons and the PR):
@@ -33,7 +34,10 @@ _EPS = 0.01
 SYSTEM_PROMPT = """\
 You review automatic cut suggestions for a Vietnamese video editor that removes stutters.
 You get a verbatim Vietnamese transcript (one word per line, "index<TAB>word"; [UH] and [UM]
-mark hesitation sounds) and candidate cuts found by rules or a voice detector.
+mark hesitation sounds) and candidate cuts found by rules or a voice detector. A candidate
+covers "words" [first, last], or has no words: "silence_after_word" i is a pause after word i;
+"unwritten_sound_after_word" i is a sound the voice detector heard after word i that the
+transcript has no word for (often a hesitation the transcriber skipped).
 
 For EVERY candidate, decide in context whether removing it keeps the meaning and sounds
 natural:
@@ -210,7 +214,13 @@ def build_prompt(words: list[Word], rng: tuple[int, int], candidates: list[Candi
     lines += ["", "Candidates (one JSON object per line):"]
     for c in candidates:
         where: dict[str, Any] = (
-            {"words": [c.first, c.last]} if c.first is not None else {"silence_after_word": c.after}
+            {"words": [c.first, c.last]}
+            if c.first is not None
+            else {
+                "silence_after_word"
+                if c.reason == "pause"
+                else "unwritten_sound_after_word": c.after
+            }
         )
         lines.append(json.dumps({"id": c.id, "reason": c.reason, "source": c.source,
                                  "rule_confidence": c.rule_confidence, **where},

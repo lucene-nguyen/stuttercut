@@ -22,6 +22,11 @@ class Cut:
     confidence: float  # 0..1, how sure the rule is; low = check this one first in review
 
 
+def tier(confidence: float, sure_min: float) -> str:
+    """Review tier shown to the user: "sure" at or above ``sure_min``, else "unsure"."""
+    return "sure" if confidence >= sure_min else "unsure"
+
+
 def normalize(text: str) -> str:
     """NFC, lower case, letters and digits only: "[UH]" -> "uh", "Tôi," -> "tôi".
 

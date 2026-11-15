@@ -91,6 +91,36 @@ class RulesConfig:
     vad_threshold: float = 0.8
     merge_gap_ms: int = 50
     min_cut_ms: int = 30
+    # Review tier: final confidence at or above this is "sure", below is "unsure" (both with
+    # and without the LLM review).
+    tier_sure_min: float = 0.7
+
+
+def _bool(raw: str) -> bool:
+    if raw.strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if raw.strip().lower() in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(raw)
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    """LLM review of cut candidates (LEARNING-208). Only transcript text is sent (ADR 0001)."""
+
+    enabled: bool = False  # off until a key is configured
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-5-5"
+    api_key: str = field(default="", repr=False)  # LLM_API_KEY in .env; never logged
+    effort: str = "medium"  # output_config.effort: low | medium | high
+    timeout_s: float = 30.0
+    max_tokens: int = 8000
+    chunk_words: int = 300
+    chunk_overlap_words: int = 40
+    weight: float = 0.6  # final = (1 - weight) * rule confidence + weight * LLM cut probability
+    price_in_per_mtok: float = 2.0  # USD, for the cost estimate in logs (Sonnet 5.5)
+    price_out_per_mtok: float = 10.0
+    prompt_file: Path | None = None  # optional override of the built-in system prompt
 
 
 @dataclass(frozen=True)
@@ -106,6 +136,7 @@ class Config:
     media: MediaConfig = field(default_factory=MediaConfig)
     log: LogConfig = field(default_factory=LogConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
+    llm: LlmConfig = field(default_factory=LlmConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
@@ -143,21 +174,38 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_VAD_THRESHOLD": ("rules", "vad_threshold", float),
     "STUTTERCUT_MERGE_GAP_MS": ("rules", "merge_gap_ms", int),
     "STUTTERCUT_MIN_CUT_MS": ("rules", "min_cut_ms", int),
+    "STUTTERCUT_TIER_SURE_MIN": ("rules", "tier_sure_min", float),
+    "STUTTERCUT_LLM_ENABLED": ("llm", "enabled", _bool),
+    "STUTTERCUT_LLM_PROVIDER": ("llm", "provider", str),
+    "STUTTERCUT_LLM_MODEL": ("llm", "model", str),
+    "LLM_API_KEY": ("llm", "api_key", str),
+    "STUTTERCUT_LLM_EFFORT": ("llm", "effort", str),
+    "STUTTERCUT_LLM_TIMEOUT_S": ("llm", "timeout_s", float),
+    "STUTTERCUT_LLM_MAX_TOKENS": ("llm", "max_tokens", int),
+    "STUTTERCUT_LLM_CHUNK_WORDS": ("llm", "chunk_words", int),
+    "STUTTERCUT_LLM_CHUNK_OVERLAP_WORDS": ("llm", "chunk_overlap_words", int),
+    "STUTTERCUT_LLM_WEIGHT": ("llm", "weight", float),
+    "STUTTERCUT_LLM_PRICE_IN_PER_MTOK": ("llm", "price_in_per_mtok", float),
+    "STUTTERCUT_LLM_PRICE_OUT_PER_MTOK": ("llm", "price_out_per_mtok", float),
+    "STUTTERCUT_LLM_PROMPT_FILE": ("llm", "prompt_file", Path),
 }
 
 
 def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env")) -> Config:
     """Defaults, then .env, then the environment (or ``env`` when given, for tests)."""
     values = {**read_dotenv(dotenv), **(os.environ if env is None else env)}
-    sections: dict[str, dict[str, object]] = {"asr": {}, "media": {}, "log": {}, "rules": {}}
+    sections: dict[str, dict[str, object]] = {
+        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {},
+    }  # fmt: skip
     for name, (section, key, cast) in _ENV.items():
         raw = values.get(name)
         if raw:
             try:
                 sections[section][key] = cast(raw)
             except ValueError as e:
-                kind = getattr(cast, "__name__", "value")
-                raise ValueError(f"{name}={raw!r} is not a valid {kind}") from e
+                kind = getattr(cast, "__name__", "value").strip("_")
+                shown = "***" if name.endswith("API_KEY") else repr(raw)
+                raise ValueError(f"{name}={shown} is not a valid {kind}") from e
     home = values.get("STUTTERCUT_HOME")
     nice = values.get("STUTTERCUT_WORKER_NICE")
     return Config(
@@ -165,6 +213,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
         media=MediaConfig(**sections["media"]),  # type: ignore[arg-type]
         log=LogConfig(**sections["log"]),  # type: ignore[arg-type]
         rules=RulesConfig(**sections["rules"]),  # type: ignore[arg-type]
+        llm=LlmConfig(**sections["llm"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
         worker_nice=int(nice) if nice else 10,
     )

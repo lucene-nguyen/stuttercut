@@ -86,3 +86,26 @@ def test_rules_thresholds_from_env() -> None:
     assert rules.pause_min_ms == 800 and rules.pause_keep_ms == 150
     assert rules.filler_tokens == ("ờ", "[UH]", "ừm")
     assert rules.repeat_keep == ("từ từ", "dần dần")
+
+
+def test_llm_defaults_off_and_env_overrides() -> None:
+    off = load_config(env={}, dotenv=Path("missing.env")).llm
+    assert (off.enabled, off.provider, off.model, off.timeout_s) == (
+        False,
+        "anthropic",
+        "claude-sonnet-5-5",
+        30.0,
+    )
+    env = {
+        "STUTTERCUT_LLM_ENABLED": "yes",
+        "LLM_API_KEY": "secret-123",
+        "STUTTERCUT_LLM_WEIGHT": "0.5",
+    }
+    on = load_config(env=env, dotenv=Path("missing.env")).llm
+    assert on.enabled and on.weight == 0.5 and on.api_key == "secret-123"
+    assert "secret-123" not in repr(on)
+
+
+def test_bad_llm_values_do_not_echo_the_key() -> None:
+    with pytest.raises(ValueError, match="STUTTERCUT_LLM_ENABLED"):
+        load_config(env={"STUTTERCUT_LLM_ENABLED": "maybe"}, dotenv=Path("missing.env"))

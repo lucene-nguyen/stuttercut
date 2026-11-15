@@ -113,6 +113,12 @@ def _try_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLM
     except Exception:  # never fails the job: rules-only cuts stay
         log.warning("LLM review failed; keeping rules-only cuts", exc_info=True,
                     extra={"job_id": job_id, "step": "llm_review"})  # fmt: skip
+    release = getattr(llm, "release", None)  # local model: free RAM/VRAM for the next job
+    if release is not None:
+        try:
+            release()
+        except Exception:
+            log.warning("could not unload the local LLM", exc_info=True, extra={"job_id": job_id})
 
 
 def run_job(

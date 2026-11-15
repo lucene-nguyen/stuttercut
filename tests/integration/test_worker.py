@@ -317,3 +317,17 @@ def test_asr_stays_loaded_with_enough_ram_or_a_remote_llm(
     run_job(conn, _with_llm(cfg, provider=provider, unload_asr_below_gb=below_gb), job_id, asr,
             None, FakeLLMClient(_llm_judges_all))  # fmt: skip
     assert asr.loaded and "unload_asr" not in [s for s, _ in spans(conn, job_id)]
+
+
+def test_local_llm_is_released_after_review_even_when_it_fails(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    from stuttercut.llm import LLMTimeout
+    from stuttercut.llm.fake import FakeLLMClient
+
+    released: list[bool] = []
+    llm = FakeLLMClient(LLMTimeout("30 s"))
+    llm.release = lambda: released.append(True)  # type: ignore[attr-defined]
+    job_id = repo.create_job(conn, str(make_video()))
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, llm) == "ready_for_review"
+    assert released == [True]

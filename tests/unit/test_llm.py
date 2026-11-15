@@ -136,11 +136,15 @@ class FakePost:
         return self.result
 
 
+def NO_PS(url: str, timeout: float) -> dict[str, Any]:
+    return {"models": []}
+
+
 def test_ollama_request_shape_and_usage() -> None:
     text = '{"verdicts": [], "retakes": []}'
     post = FakePost({"message": {"role": "assistant", "content": text}, "done_reason": "stop",
                      "prompt_eval_count": 900, "eval_count": 40})  # fmt: skip
-    client = OllamaClient(CFG, post=post)
+    client = OllamaClient(CFG, post=post, get=NO_PS)
     out = client.complete("system text", "0	tôi", SCHEMA)
     assert (out.text, out.input_tokens, out.output_tokens) == (
         '{"verdicts": [], "retakes": []}', 900, 40,
@@ -168,7 +172,7 @@ def test_ollama_request_shape_and_usage() -> None:
 )  # fmt: skip
 def test_ollama_errors_map_to_llm_errors(error: Exception, kind: type, match: str) -> None:
     with pytest.raises(kind, match=match):
-        OllamaClient(CFG, post=FakePost(error)).complete("s", "p", SCHEMA)
+        OllamaClient(CFG, post=FakePost(error), get=NO_PS).complete("s", "p", SCHEMA)
 
 
 @pytest.mark.parametrize(
@@ -189,10 +193,28 @@ def test_load_llm_picks_the_provider(env: dict[str, str], expected: str | None) 
     assert (type(llm).__name__ if llm else None) == expected
 
 
+def test_ollama_full_context_is_an_error_not_a_silent_truncation() -> None:
+    post = FakePost({"message": {"content": "{}"}, "done_reason": "stop",
+                     "prompt_eval_count": 8100, "eval_count": 92})  # fmt: skip
+    with pytest.raises(LLMError, match="STUTTERCUT_LLM_NUM_CTX"):
+        OllamaClient(CFG, post=post, get=NO_PS).complete("s", "p", SCHEMA)
+
+
+def test_ollama_release_unloads_and_peak_memory_is_tracked() -> None:
+    post = FakePost({"message": {"content": "{}"}, "prompt_eval_count": 10, "eval_count": 5})
+    ps = {"models": [{"name": "qwen3:8b", "size": 6 * 2**30, "size_vram": 5 * 2**30}]}
+    client = OllamaClient(CFG, post=post, get=lambda url, t: ps)
+    client.complete("s", "p", SCHEMA)
+    client.release()
+    assert client.peak_resident_mb == (6144, 5120)
+    url, payload, _ = post.calls[-1]
+    assert url.endswith("/api/generate") and payload == {"model": "qwen3:8b", "keep_alive": 0}
+
+
 def test_ollama_truncated_reply_is_an_error() -> None:
     post = FakePost({"message": {"content": '{"verdicts": ['}, "done_reason": "length"})
     with pytest.raises(LLMError, match="8000 tokens"):
-        OllamaClient(CFG, post=post).complete("s", "p", SCHEMA)
+        OllamaClient(CFG, post=post, get=NO_PS).complete("s", "p", SCHEMA)
 
 
 # --- chunking and request ----------------------------------------------------------------------

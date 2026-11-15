@@ -119,8 +119,8 @@ class LlmConfig:
     api_key: str = field(default="", repr=False)  # LLM_API_KEY in .env; never logged
     effort: str = "medium"  # anthropic output_config.effort: low | medium | high
     ollama_url: str = "http://127.0.0.1:11434"
-    num_ctx: int = 8192  # ollama context window (tokens); a 300-word chunk needs ~2-3k
-    keep_alive: str = "1m"  # ollama keeps the model loaded this long after a request
+    num_ctx: int = 8192  # ollama context window (tokens): one chunk + system prompt + reply
+    keep_alive: str = "30s"  # bridges chunk requests; the model is unloaded after llm_review
     unload_asr_below_gb: float = 8.0  # local LLM: free the ASR model first when free RAM is lower
     timeout_s: float = 30.0
     max_tokens: int = 8000

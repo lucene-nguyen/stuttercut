@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         vad = load_vad(cfg)
         llm = load_llm(cfg)
         status = run_job(conn, cfg, job_id, transcriber, vad, llm)
-        resident = getattr(llm, "resident", lambda: None)()  # before keep_alive expires
+        resident = getattr(llm, "peak_resident_mb", None)  # Ollama's own process, not ours
         reload_s = None
         if isinstance(transcriber, Unloadable) and not transcriber.loaded:
             t0 = time.perf_counter()  # what the next job pays for the unload
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         keeps = sum(c["llm_verdict"] == "keep" for c in cuts)
         new = sum(c["source"] == "llm" for c in cuts)
         if resident:
-            print(f"llm resident in Ollama: {resident[0]} MB, of which VRAM {resident[1]} MB")
+            print(f"llm peak in Ollama: {resident[0]} MB, of which VRAM {resident[1]} MB")
         print(
             f"llm {cfg.llm.provider} {llm.model}: "
             f"tokens in {job['llm_input_tokens']} out {job['llm_output_tokens']}, "

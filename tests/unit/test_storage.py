@@ -135,3 +135,26 @@ def test_replace_cuts_keeps_user_restored_ones(conn: sqlite3.Connection) -> None
         repo.cut_counts(conn, job_id, "kept")
     with pytest.raises(sqlite3.IntegrityError):
         repo.replace_cuts(conn, job_id, [Cut(1.0, 1.0, "filler", "rules", 0.5)])
+
+
+def test_approve_modes_and_latest_renderable_job(conn: sqlite3.Connection) -> None:
+    from stuttercut.rules import Cut
+
+    job_id = repo.create_job(conn, "a.mp4")
+    repo.replace_cuts(conn, job_id, [Cut(0.0, 0.3, "filler", "rules", 0.9),
+                                     Cut(1.0, 1.4, "filler", "vad", 0.4),
+                                     Cut(2.0, 2.4, "repeat", "rules", 0.8)])  # fmt: skip
+    kept = repo.get_cuts(conn, job_id)[2]["id"]
+    repo.set_cut_kept(conn, kept, True)  # the user restored it: never rendered as a cut
+    assert repo.approve_cuts(conn, job_id, "sure") == 1
+    assert repo.approved_cuts(conn, job_id) == [(0.0, 0.3)]
+    assert repo.approve_cuts(conn, job_id, "all") == 2
+    assert repo.approve_cuts(conn, job_id, "none") == 0
+    with pytest.raises(ValueError, match="approve"):
+        repo.approve_cuts(conn, job_id, "maybe")
+
+    assert repo.latest_job(conn) is None  # still queued
+    repo.set_status(conn, job_id, "failed", failed_step="render", error="x")
+    assert repo.latest_job(conn) == job_id
+    repo.set_status(conn, job_id, "failed", failed_step="transcribe", error="x")
+    assert repo.latest_job(conn) is None

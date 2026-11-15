@@ -23,19 +23,25 @@ if os.environ.get("STUTTERCUT_REQUIRE_FFMPEG") == "1" and not HAS_FFMPEG:
 @pytest.fixture
 def cfg(tmp_path: Path) -> Config:
     """Default config with all state under tmp_path; ignores the developer's env and .env."""
-    return load_config(env={"STUTTERCUT_HOME": str(tmp_path / "home")}, dotenv=tmp_path / "none")
+    env = {
+        "STUTTERCUT_HOME": str(tmp_path / "home"),
+        "STUTTERCUT_OUTPUT_DIR": str(tmp_path / "out"),
+    }
+    return load_config(env=env, dotenv=tmp_path / "none")
 
 
 @pytest.fixture
 def make_video(tmp_path: Path) -> Callable[..., Path]:
-    """make_video(name, seconds=2.0, audio=True) -> a tiny MP4 made from test patterns."""
+    """make_video(name, seconds=2.0, audio=True, fps=10) -> a tiny MP4 made from test patterns."""
     if not HAS_FFMPEG:
         pytest.skip("ffmpeg/ffprobe not on PATH")
 
-    def make(name: str = "clip thử nghiệm.mp4", seconds: float = 2.0, audio: bool = True) -> Path:
+    def make(
+        name: str = "clip thử nghiệm.mp4", seconds: float = 2.0, audio: bool = True, fps: int = 10
+    ) -> Path:
         out = tmp_path / name
         cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
-        cmd += ["-f", "lavfi", "-i", f"testsrc=size=64x48:rate=10:duration={seconds}"]
+        cmd += ["-f", "lavfi", "-i", f"testsrc=size=64x48:rate={fps}:duration={seconds}"]
         if audio:
             cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=44100:duration={seconds}"]
         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]

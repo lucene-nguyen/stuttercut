@@ -91,6 +91,56 @@ class RulesConfig:
     vad_threshold: float = 0.8
     merge_gap_ms: int = 50
     min_cut_ms: int = 30
+    # Review tier: final confidence at or above this is "sure", below is "unsure" (both with
+    # and without the LLM review).
+    tier_sure_min: float = 0.7
+
+
+def _bool(raw: str) -> bool:
+    if raw.strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if raw.strip().lower() in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(raw)
+
+
+LLM_PROVIDERS = ("ollama", "anthropic")
+# qwen3:8b: strong Vietnamese (119-language pretraining) and JSON, q4 fits 8 GB VRAM / 16 GB Mac
+DEFAULT_MODELS = {"ollama": "qwen3:8b", "anthropic": "claude-sonnet-5-5"}
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    """LLM review of cut candidates (LEARNING-208). Only transcript text is sent (ADR 0001)."""
+
+    enabled: bool = False  # opt-in: needs Ollama running, or an API key for anthropic
+    provider: str = "ollama"  # ollama (local, nothing leaves the machine) | anthropic
+    model: str = ""  # empty = DEFAULT_MODELS[provider]
+    api_key: str = field(default="", repr=False)  # LLM_API_KEY in .env; never logged
+    effort: str = "medium"  # anthropic output_config.effort: low | medium | high
+    ollama_url: str = "http://127.0.0.1:11434"
+    num_ctx: int = 6144  # ollama: one chunk + prompt + reply; c001 peak 2.6k (local-llm.md)
+    keep_alive: str = "30s"  # bridges chunk requests; the model is unloaded after llm_review
+    unload_asr_below_gb: float = 8.0  # local LLM, MPS/CPU: free the ASR model below this free RAM
+    expected_gb: float = 6.0  # local LLM size in memory (weights + KV cache at num_ctx)
+    vram_margin_gb: float = 1.0  # CUDA: free the ASR model when free VRAM < expected + margin
+    load_timeout_s: float = 120.0  # loading the local model before the first chunk
+    timeout_s: float = 30.0  # per chunk request
+    max_tokens: int = 8000
+    chunk_words: int = 150  # keeps a local 8B chunk well under timeout_s (~0.9 s per candidate)
+    chunk_overlap_words: int = 30
+    weight: float = 0.6  # final = (1 - weight) * rule confidence + weight * LLM cut probability
+    price_in_per_mtok: float = 2.0  # USD (Sonnet 5.5), for the cost estimate; ollama costs 0
+    price_out_per_mtok: float = 10.0
+    prompt_file: Path | None = None  # optional override of the built-in system prompt
+
+    def __post_init__(self) -> None:
+        if self.provider not in LLM_PROVIDERS:
+            raise ValueError(
+                f"STUTTERCUT_LLM_PROVIDER must be one of {LLM_PROVIDERS}, got {self.provider!r}"
+            )
+        if not self.model:
+            object.__setattr__(self, "model", DEFAULT_MODELS[self.provider])
 
 
 @dataclass(frozen=True)
@@ -106,6 +156,7 @@ class Config:
     media: MediaConfig = field(default_factory=MediaConfig)
     log: LogConfig = field(default_factory=LogConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
+    llm: LlmConfig = field(default_factory=LlmConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
@@ -143,21 +194,45 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_VAD_THRESHOLD": ("rules", "vad_threshold", float),
     "STUTTERCUT_MERGE_GAP_MS": ("rules", "merge_gap_ms", int),
     "STUTTERCUT_MIN_CUT_MS": ("rules", "min_cut_ms", int),
+    "STUTTERCUT_TIER_SURE_MIN": ("rules", "tier_sure_min", float),
+    "STUTTERCUT_LLM_ENABLED": ("llm", "enabled", _bool),
+    "STUTTERCUT_LLM_PROVIDER": ("llm", "provider", str),
+    "STUTTERCUT_LLM_MODEL": ("llm", "model", str),
+    "LLM_API_KEY": ("llm", "api_key", str),
+    "STUTTERCUT_LLM_EFFORT": ("llm", "effort", str),
+    "STUTTERCUT_LLM_TIMEOUT_S": ("llm", "timeout_s", float),
+    "STUTTERCUT_LLM_MAX_TOKENS": ("llm", "max_tokens", int),
+    "STUTTERCUT_LLM_CHUNK_WORDS": ("llm", "chunk_words", int),
+    "STUTTERCUT_LLM_CHUNK_OVERLAP_WORDS": ("llm", "chunk_overlap_words", int),
+    "STUTTERCUT_LLM_WEIGHT": ("llm", "weight", float),
+    "STUTTERCUT_LLM_PRICE_IN_PER_MTOK": ("llm", "price_in_per_mtok", float),
+    "STUTTERCUT_LLM_PRICE_OUT_PER_MTOK": ("llm", "price_out_per_mtok", float),
+    "STUTTERCUT_LLM_PROMPT_FILE": ("llm", "prompt_file", Path),
+    "STUTTERCUT_OLLAMA_URL": ("llm", "ollama_url", str),
+    "STUTTERCUT_LLM_NUM_CTX": ("llm", "num_ctx", int),
+    "STUTTERCUT_LLM_KEEP_ALIVE": ("llm", "keep_alive", str),
+    "STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB": ("llm", "unload_asr_below_gb", float),
+    "STUTTERCUT_LLM_EXPECTED_GB": ("llm", "expected_gb", float),
+    "STUTTERCUT_LLM_VRAM_MARGIN_GB": ("llm", "vram_margin_gb", float),
+    "STUTTERCUT_LLM_LOAD_TIMEOUT_S": ("llm", "load_timeout_s", float),
 }
 
 
 def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env")) -> Config:
     """Defaults, then .env, then the environment (or ``env`` when given, for tests)."""
     values = {**read_dotenv(dotenv), **(os.environ if env is None else env)}
-    sections: dict[str, dict[str, object]] = {"asr": {}, "media": {}, "log": {}, "rules": {}}
+    sections: dict[str, dict[str, object]] = {
+        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {},
+    }  # fmt: skip
     for name, (section, key, cast) in _ENV.items():
         raw = values.get(name)
         if raw:
             try:
                 sections[section][key] = cast(raw)
             except ValueError as e:
-                kind = getattr(cast, "__name__", "value")
-                raise ValueError(f"{name}={raw!r} is not a valid {kind}") from e
+                kind = getattr(cast, "__name__", "value").strip("_")
+                shown = "***" if name.endswith("API_KEY") else repr(raw)
+                raise ValueError(f"{name}={shown} is not a valid {kind}") from e
     home = values.get("STUTTERCUT_HOME")
     nice = values.get("STUTTERCUT_WORKER_NICE")
     return Config(
@@ -165,6 +240,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
         media=MediaConfig(**sections["media"]),  # type: ignore[arg-type]
         log=LogConfig(**sections["log"]),  # type: ignore[arg-type]
         rules=RulesConfig(**sections["rules"]),  # type: ignore[arg-type]
+        llm=LlmConfig(**sections["llm"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
         worker_nice=int(nice) if nice else 10,
     )

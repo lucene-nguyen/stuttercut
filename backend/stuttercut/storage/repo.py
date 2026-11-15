@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 
 from stuttercut.asr import Word
-from stuttercut.rules import Cut
+from stuttercut.rules import Cut, tier
 
 VARIANTS = ("verbatim", "intended")
 
@@ -42,7 +42,10 @@ def set_status(
 
 
 def update_job(conn: sqlite3.Connection, job_id: str, **fields: object) -> None:
-    allowed = {"duration_s", "output_path", "peak_rss_mb"}
+    allowed = {
+        "duration_s", "output_path", "peak_rss_mb",
+        "llm_input_tokens", "llm_output_tokens", "llm_cost_usd",
+    }  # fmt: skip
     if not fields or not set(fields) <= allowed:
         raise ValueError(f"update_job accepts only {sorted(allowed)}, got {sorted(fields)}")
     assignments = ", ".join(f"{name} = ?" for name in fields)
@@ -101,7 +104,9 @@ def get_spans(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM span WHERE job_id = ? ORDER BY id", (job_id,)))
 
 
-def replace_cuts(conn: sqlite3.Connection, job_id: str, cuts: list[Cut]) -> int:
+def replace_cuts(
+    conn: sqlite3.Connection, job_id: str, cuts: list[Cut], sure_min: float = 0.7
+) -> int:
     """Replace the job's detected cuts; cuts the user kept (kept=1) are never touched.
 
     A new cut that overlaps a kept one by more than half of itself is skipped, so a re-run
@@ -121,11 +126,52 @@ def replace_cuts(conn: sqlite3.Connection, job_id: str, cuts: list[Cut]) -> int:
             )
         ]
         conn.executemany(
-            "INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            [(job_id, c.start, c.end, c.reason, c.source, c.confidence) for c in fresh],
+            "INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence, tier,"
+            " rule_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    job_id,
+                    c.start,
+                    c.end,
+                    c.reason,
+                    c.source,
+                    c.confidence,
+                    tier(c.confidence, sure_min),
+                    c.confidence,
+                )
+                for c in fresh
+            ],
         )
     return len(fresh)
+
+
+def apply_review(
+    conn: sqlite3.Connection,
+    cut_id: int,
+    confidence: float,
+    tier_: str,
+    verdict: str,
+    llm_confidence: float,
+    reason: str,
+) -> None:
+    """Store the LLM verdict and the combined confidence on one cut (the cut stays)."""
+    with conn:
+        conn.execute(
+            "UPDATE cut SET confidence = ?, tier = ?, llm_verdict = ?, llm_confidence = ?,"
+            " llm_reason = ? WHERE id = ?",
+            (confidence, tier_, verdict, llm_confidence, reason, cut_id),
+        )
+
+
+def add_llm_cut(conn: sqlite3.Connection, job_id: str, cut: Cut, tier_: str, reason: str) -> None:
+    """A cut proposed by the LLM itself (source=llm): no rule confidence."""
+    with conn:
+        conn.execute(
+            "INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence, tier,"
+            " llm_verdict, llm_confidence, llm_reason) VALUES (?, ?, ?, ?, ?, ?, ?, 'cut', ?, ?)",
+            (job_id, cut.start, cut.end, cut.reason, cut.source, cut.confidence, tier_,
+             cut.confidence, reason),
+        )  # fmt: skip
 
 
 def get_cuts(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
@@ -138,11 +184,17 @@ def set_cut_kept(conn: sqlite3.Connection, cut_id: int, kept: bool) -> None:
 
 
 def cut_counts(conn: sqlite3.Connection, job_id: str, by: str) -> dict[str, int]:
-    """Active (not kept) cuts per ``reason`` or per ``source``."""
-    if by not in ("reason", "source"):
-        raise ValueError(f"by must be reason or source, got {by!r}")
+    """Active (not kept) cuts per ``reason``, ``source`` or ``tier``."""
+    if by not in ("reason", "source", "tier"):
+        raise ValueError(f"by must be reason, source or tier, got {by!r}")
     rows = conn.execute(
         f"SELECT {by} AS k, COUNT(*) AS n FROM cut WHERE job_id = ? AND kept = 0 GROUP BY {by}",
         (job_id,),
     )
     return {r["k"]: r["n"] for r in rows}
+
+
+def clear_llm_cuts(conn: sqlite3.Connection, job_id: str) -> None:
+    """Remove cuts the LLM proposed (not kept) before a new review."""
+    with conn:
+        conn.execute("DELETE FROM cut WHERE job_id = ? AND source = 'llm' AND kept = 0", (job_id,))

@@ -27,3 +27,14 @@ never audio, video or file paths. No accounts, no cloud services, no settings sc
   device/encoder selection with fallbacks.
 - When the LLM API is unreachable, the pipeline falls back to rule-only detection.
 - Adding any service, database or cloud dependency needs a new ADR.
+
+## Amendment — local LLM by default (LEARNING-208, 2026-11-15)
+
+The LLM review now defaults to a **local model through Ollama** (`STUTTERCUT_LLM_PROVIDER=ollama`,
+HTTP on `127.0.0.1:11434`), so by default nothing leaves the machine, not even transcript text.
+The Anthropic Messages API stays as an opt-in provider (`anthropic` + `LLM_API_KEY`) under the
+original rule: transcript text and candidate word ranges only, never audio, video, timestamps,
+file paths or clip names. Ollama is a local runtime the user installs, not a cloud service; it
+runs as its own process, so its memory is outside the worker and is reported separately by the
+CLI. When Ollama is not running or the model is missing, the review falls back to rules-only
+like any other LLM failure.

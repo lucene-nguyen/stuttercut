@@ -35,4 +35,20 @@ Run lint, mypy, pytest. Then run the CLI on c001 (default verbatim) and, if eval
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/4 (merged 2026-11-14).
+
+**Worked well**
+- Rule engine as pure functions: 100% coverage, hypothesis properties for repeats and merging; detect step 2.2 s on c001.
+- Works on verbatim only; diff and VAD are optional sources; user-kept cuts survive re-runs.
+- c001 (GPU idle): transcribe 81.1 s, 48 cuts (filler 33, pause 3, repeat 5, retake 7).
+
+**Had to be corrected or deviated from the prompt**
+- CrisperWhisper writes Vietnamese hesitations as `[UH]`/`[UM]`, not "ờ"/"ừm"; the spike's filler counts were wrong for it (correction added to the spike report).
+- silero VAD at 0.5 heard the noisy laptop mic as speech (153/161 s), so no pause survived; default 0.8, provisional.
+- The simple retake rule flagged common phrases; now needs a hesitation before the restart (19 → 7).
+- Importing silero sets torch to 1 thread; fixed, but measured no cost on CUDA.
+- A game on the same GPU made two timing runs useless (232–267 s); re-measured with the GPU idle.
+- No labelled clip yet, so `eval.score_cuts` had nothing to score ([lesson 003](../lessons/003-check-what-the-model-really-writes.md)).
+
+**Next time**
+- Label at least c001 before tuning thresholds; check `nvidia-smi` before timing.

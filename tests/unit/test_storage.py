@@ -72,7 +72,35 @@ def test_replace_words_is_retry_safe(conn: sqlite3.Connection) -> None:
 
 def test_migration_2_adds_cut_table(conn: sqlite3.Connection) -> None:
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(cut)")}
-    assert columns == {"id", "job_id", "start_s", "end_s", "reason", "source", "confidence", "kept"}
+    assert {"id", "job_id", "start_s", "end_s", "reason", "source", "confidence", "kept"} <= columns
+
+
+def test_migration_3_adds_review_columns(conn: sqlite3.Connection) -> None:
+    cut_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cut)")}
+    job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(job)")}
+    assert {"tier", "rule_confidence", "llm_verdict", "llm_confidence", "llm_reason"} <= cut_cols
+    assert {"llm_input_tokens", "llm_output_tokens", "llm_cost_usd"} <= job_cols
+
+
+def test_review_updates_and_llm_cuts(conn: sqlite3.Connection) -> None:
+    from stuttercut.rules import Cut
+
+    job_id = repo.create_job(conn, "a.mp4")
+    repo.replace_cuts(conn, job_id, [Cut(0.0, 0.3, "filler", "rules", 0.9),
+                                     Cut(1.0, 1.4, "filler", "vad", 0.4)])  # fmt: skip
+    sure, unsure = repo.get_cuts(conn, job_id)
+    assert (sure["tier"], sure["rule_confidence"]) == ("sure", 0.9)
+    assert unsure["tier"] == "unsure" and unsure["llm_verdict"] is None
+
+    repo.apply_review(conn, unsure["id"], 0.2, "unsure", "keep", 0.8, "meaningful word")
+    repo.add_llm_cut(conn, job_id, Cut(2.0, 3.0, "retake", "llm", 0.85), "sure", "restarted")
+    rows = repo.get_cuts(conn, job_id)
+    assert [(r["source"], r["confidence"], r["llm_verdict"]) for r in rows] == [
+        ("rules", 0.9, None), ("vad", 0.2, "keep"), ("llm", 0.85, "cut"),
+    ]  # fmt: skip
+    assert rows[1]["rule_confidence"] == 0.4  # the rule's own confidence is kept
+    assert repo.cut_counts(conn, job_id, "tier") == {"sure": 2, "unsure": 1}
+    repo.update_job(conn, job_id, llm_input_tokens=1200, llm_output_tokens=300, llm_cost_usd=0.0054)
 
 
 def test_migrate_from_version_1_keeps_jobs(tmp_path: Path) -> None:

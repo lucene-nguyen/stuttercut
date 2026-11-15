@@ -1,0 +1,36 @@
+id,category,expected,sentence,note
+h1,filler_hesitation,cut,hôm nay {ờ} mình sẽ nói về giá,hesitation mid-sentence
+h2,filler_hesitation,cut,cái này {ừm} thì là cái áo,hesitation before the noun
+h3,filler_hesitation,cut,{[UH]} chào các bạn,hesitation sound at the start
+h4,filler_hesitation,cut,giá của nó {à} là hai trăm nghìn,"""à"" as hesitation before the price"
+h5,filler_hesitation,cut,sản phẩm này {ừ} rất là bền,"""ừ"" as hesitation mid-sentence"
+h6,filler_hesitation,cut,các bạn nhớ {[UM]} bấm theo dõi nhé,hesitation sound mid-sentence
+h7,filler_hesitation,cut,và {ờ} chúng ta bắt đầu thôi,hesitation after a conjunction
+m1,filler_meaningful,keep,anh đi rồi {à},question particle
+m2,filler_meaningful,keep,{à} ra là vậy,realisation interjection
+m3,filler_meaningful,keep,em làm xong chưa {ừ} xong rồi,"""ừ"" as an answer"
+m4,filler_meaningful,keep,thế {à} vậy thì mình làm lại,"surprise ""thế à"""
+m5,filler_meaningful,keep,{ờ} đúng rồi đấy,"""ờ"" as agreement"
+m6,filler_meaningful,keep,giá rẻ vậy {à},question particle after an adjective
+m7,filler_meaningful,keep,{à} quên mất mình chưa giới thiệu,recall interjection
+r1,repeat_true,cut,{tôi} tôi sẽ nói về giá,stuttered pronoun
+r2,repeat_true,cut,{cái này} cái này là quà tặng,repeated phrase
+r3,repeat_true,cut,mình {sẽ} sẽ gửi cho các bạn,stuttered auxiliary
+r4,repeat_true,cut,{chúng ta} chúng ta cùng xem nhé,repeated phrase at the start
+i1,repeat_intentional,keep,áo này đẹp {lắm} lắm luôn,emphatic doubling
+i2,repeat_intentional,keep,các bạn cứ đi {từ} từ thôi,"reduplicated word ""từ từ"""
+i3,repeat_intentional,keep,{nhanh lên} nhanh lên các bạn ơi,urging repetition
+i4,repeat_intentional,keep,giá sẽ tăng {dần} dần,"reduplicated word ""dần dần"""
+t1,retake_candidate,cut,{bài đầu tiên chúng ta} [UH] bài đầu tiên là về giá,abandoned start then restart
+t2,retake_candidate,cut,{mình sẽ} mình đã thử cái này,"correction ""sẽ"" -> ""đã"""
+t3,retake_candidate,cut,{hôm nay mình} hôm qua mình đã mua,"correction ""nay"" -> ""qua"""
+k1,retake_candidate,keep,{tôi thích táo} tôi thích cam,two statements with a shared start
+k2,retake_candidate,keep,{bước một là mở hộp} bước hai là lắp pin,list items
+f1,retake_found,found,{giá của cái} giá của chiếc áo này là hai trăm,retake with no candidate
+f2,retake_found,found,{các bạn có thể} các bạn nên thử ngay,retake with no candidate
+n1,retake_found,none,hôm nay mình sẽ giới thiệu chiếc áo này,no retake
+n2,retake_found,none,sản phẩm bền đẹp và giá rất hợp lý,no retake
+v1,vad_no_text,cut,giá của nó {~} là hai trăm nghìn,unwritten sound mid-phrase
+v2,vad_no_text,cut,chúng ta {~} bắt đầu nhé,unwritten sound mid-phrase
+v3,vad_no_text,keep,anh đi rồi {~},likely an unwritten sentence-final particle
+v4,vad_no_text,keep,{~} ra là vậy,"likely an unwritten ""à"" interjection"

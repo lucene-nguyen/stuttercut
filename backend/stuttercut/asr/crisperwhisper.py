@@ -6,6 +6,7 @@ one decoder pass (``transcribe_dual``); on transformers (CPU/CUDA/MPS) it is a s
 which roughly doubles transcribe time (lesson 002). Default is verbatim only.
 """
 
+import gc
 from pathlib import Path
 from typing import Any
 
@@ -32,14 +33,36 @@ class CrisperWhisperTranscriber:
         self.model_id = size if "/" in size else f"nyralabs/CrisperWhisper2.0_{size}"
         self.device = device
         self._cfg = cfg
-        self._model = CrisperWhisperModel(
-            self.model_id,
-            backend=cfg.backend,
-            device=device,
-            compute_type="float32" if device == "cpu" else "float16",
-        )
+        self._model: Any = None
+        self._cls = CrisperWhisperModel
+        self.load()
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def load(self) -> None:
+        if self._model is None:
+            self._model = self._cls(
+                self.model_id,
+                backend=self._cfg.backend,
+                device=self.device,
+                compute_type="float32" if self.device == "cpu" else "float16",
+            )
+
+    def unload(self) -> None:
+        """Drop the model and return its memory to the OS / GPU (before a local LLM runs)."""
+        import torch
+
+        self._model = None
+        gc.collect()
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+        elif self.device == "mps":
+            torch.mps.empty_cache()
 
     def _pass(self, audio_path: Path, mode: str) -> Any:
+        self.load()  # no-op unless unloaded
         return self._model.transcribe(
             str(audio_path), language=self._cfg.language, mode=mode, word_timestamps=True
         )
@@ -50,6 +73,7 @@ class CrisperWhisperTranscriber:
                 verbatim=_words(self._pass(audio_path, "verbatim")), intended=None
             )
         if self._cfg.backend == "ct2":
+            self.load()
             verbatim, intended = self._model.transcribe_dual(
                 str(audio_path),
                 language=self._cfg.language,

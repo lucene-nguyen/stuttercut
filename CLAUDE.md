@@ -7,7 +7,7 @@ Guidance for Claude Code working in this repository. Read this first, then the d
 StutterCut is a **local web app** that detects stutters, filler words, long pauses and retakes in short Vietnamese videos (≤ 3 minutes), lets a person review the suggested cuts, then renders a clean video.
 
 - Runs on one machine. Develop on **Windows**, run on **macOS (Apple Silicon, 16 GB RAM)**. Same codebase for both.
-- Only **transcript text** ever leaves the machine (LLM API for retake detection). Never send audio or video anywhere.
+- The LLM review runs on a local model (Ollama) by default. With the opt-in Anthropic provider, only **transcript text** leaves the machine. Never send audio or video anywhere.
 - Keep it simple: 3 UI screens (Upload & jobs, Review & render, Diagnostics), no settings screen, no accounts, no cloud services.
 
 ## Design documents (source of truth)
@@ -32,6 +32,7 @@ Browser UI (React) talks only to the **API server** (FastAPI): REST + SSE progre
 
 - **Backend:** Python 3.11+, FastAPI, Uvicorn, `multiprocessing`, SQLite, `psutil`, `platformdirs`
 - **ML:** CrisperWhisper 2.0 large, verbatim mode, via PyTorch (`mps` → `cuda` → `cpu`; `turbo` when the RAM pre-flight fails). Cut candidates = verbatim vs intended diff + VAD uncovered segments + pause rules ([ADR 0002](docs/adr/0002-crisperwhisper-verbatim-asr.md))
+- **LLM review:** Ollama + `qwen3:8b` locally (default), or the Anthropic Messages API (opt-in, text only)
 - **Media:** FFmpeg (`h264_videotoolbox` → `h264_nvenc` → `libx264`)
 - **Frontend:** React + TypeScript (strict), Vite
 - **Quality:** ruff, mypy, pytest, hypothesis, vitest, Playwright, `@axe-core/playwright`, pre-commit, GitHub Actions
@@ -93,6 +94,8 @@ cd frontend && npm install
 uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
 pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
 python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word + cut counts, peak RAM (no text)
+# LLM review: install Ollama, `ollama pull qwen3:8b`, set STUTTERCUT_LLM_ENABLED=true (docs/guides/local-llm.md);
+#   the CLI then prints tiers, tokens, Ollama RAM/VRAM and the ASR reload cost. Anthropic: PROVIDER=anthropic + LLM_API_KEY
 cd frontend && npm run dev                           # UI on 127.0.0.1:5173, proxies /api
 
 # quality (Python tool config lives in the root pyproject.toml)
@@ -109,6 +112,7 @@ python -m eval.convert_audacity "$STUTTERCUT_DATA_DIR/audacity" eval/labels
 python -m eval.run_spike                             # needs STUTTERCUT_DATA_DIR + labelled clips
 python -m eval.score_spike eval/reports/<date>
 python -m eval.score_cuts                            # detector P/R/F1 vs eval/labels (needs a CLI run per clip)
+python -m eval.llm_bench --provider ollama           # LLM verdict accuracy on synthetic sentences (3 runs)
 cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
 cd frontend && npm run build
 ```

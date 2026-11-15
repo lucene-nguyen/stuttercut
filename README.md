@@ -4,8 +4,9 @@ StutterCut is a **local web app** that finds stutters, filler words, long pauses
 short Vietnamese videos (≤ 3 minutes), lets you review the suggested cuts, then renders a clean
 video or exports FCP XML.
 
-Everything runs on your machine. Only transcript text is sent to an LLM API (for retake
-detection); audio and video never leave the machine.
+Everything runs on your machine, including the LLM that reviews cuts (Ollama, by default).
+If you opt in to the Anthropic API instead, only transcript text is sent; audio and video
+never leave the machine.
 
 > Status: repository foundations only. The API serves `GET /api/health`; the pipeline is not built yet.
 
@@ -22,7 +23,7 @@ python -m venv .venv
 . .venv/bin/activate                 # Windows: .venv\Scripts\Activate.ps1
 pip install -e "backend[dev]"
 pre-commit install
-cp .env.example .env                 # then fill in LLM_API_KEY
+cp .env.example .env                 # LLM_API_KEY only for the opt-in Anthropic provider
 cd frontend && npm install
 ```
 

@@ -62,3 +62,11 @@ in LEARNING-206 / LEARNING-207; they do not block this decision.
   License. Accepted because StutterCut is personal / learning use; any commercial use needs a
   licence from Nyra Health or a model swap.
 - The model loads only in the worker process.
+- **Sharing memory with a local LLM (LEARNING-208):** with the Ollama provider, the worker
+  unloads CrisperWhisper before `llm_review` and empties the CUDA/MPS cache when the LLM would
+  not fit next to it: on CUDA when free VRAM < LLM size + margin (6 + 1 GB), on MPS/CPU when
+  free RAM < `STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB` (8 GB). The next job loads it again (span
+  `load_model`, 5.5 s on the RTX 4060). On c001 this halved `llm_review` (48 s vs 91 s with
+  CrisperWhisper still on the 8 GB GPU); on a 16 GB Mac the two models never sit in memory
+  together. See [docs/guides/local-llm.md](../guides/local-llm.md) for
+  measured numbers.

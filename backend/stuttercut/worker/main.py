@@ -11,6 +11,7 @@ from typing import Protocol
 
 from stuttercut.asr import Transcriber
 from stuttercut.config import Config, load_config
+from stuttercut.llm import LLMClient, LLMError
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.logging import setup_logging
 from stuttercut.platform import preflight_model_size, select_device
@@ -46,6 +47,27 @@ def load_vad(cfg: Config) -> VoiceDetector | None:
         return None
 
 
+def load_llm(cfg: Config) -> LLMClient | None:
+    """The review LLM when STUTTERCUT_LLM_ENABLED=true; None means rules-only.
+
+    ollama (default) needs no key; if Ollama is not running, each review fails and falls back.
+    anthropic needs LLM_API_KEY.
+    """
+    if not cfg.llm.enabled:
+        return None
+    if cfg.llm.provider == "ollama":
+        from stuttercut.llm.ollama_client import OllamaClient
+
+        return OllamaClient(cfg.llm)
+    from stuttercut.llm.anthropic_client import AnthropicClient
+
+    try:
+        return AnthropicClient(cfg.llm)
+    except LLMError:
+        log.warning("LLM review enabled but LLM_API_KEY is empty; LLM review is off")
+        return None
+
+
 def lower_priority(nice: int) -> None:
     """Keep the machine usable during a job (design: worker os.nice(10))."""
     if nice <= 0:
@@ -66,6 +88,7 @@ def worker_main(
     cfg: Config | None = None,
     make_transcriber: Callable[[Config], Transcriber] = load_transcriber,
     make_vad: Callable[[Config], VoiceDetector | None] = load_vad,
+    make_llm: Callable[[Config], LLMClient | None] = load_llm,
 ) -> None:
     cfg = cfg or load_config()
     setup_logging(paths.log_dir(cfg), cfg.log)
@@ -75,14 +98,15 @@ def worker_main(
         transcriber: Transcriber | None = make_transcriber(cfg)
         load_error = ""
         vad = make_vad(cfg)
+        llm = make_llm(cfg)
     except Exception as e:  # e.g. InsufficientMemoryError: fail jobs clearly, keep serving
         log.error("ASR model failed to load", exc_info=True)
-        transcriber, load_error, vad = None, f"{type(e).__name__}: {e}", None
+        transcriber, load_error, vad, llm = None, f"{type(e).__name__}: {e}", None, None
     try:
         while (job_id := job_queue.get()) is not None:
             if transcriber is None:
                 repo.set_status(conn, job_id, "failed", failed_step="load_model", error=load_error)
                 continue
-            run_job(conn, cfg, job_id, transcriber, vad)
+            run_job(conn, cfg, job_id, transcriber, vad, llm)
     finally:
         conn.close()

@@ -6,7 +6,7 @@ The intended pass is optional (``STUTTERCUT_ASR_PASSES``): ``verbatim`` (default
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 PASSES = ("verbatim", "dual")
 
@@ -29,3 +29,14 @@ class Transcriber(Protocol):
     device: str
 
     def transcribe(self, audio_path: Path) -> TranscriptPair: ...
+
+
+@runtime_checkable
+class Unloadable(Protocol):
+    """A transcriber that can free its model (before a local LLM runs) and load it again."""
+
+    loaded: bool
+
+    def load(self) -> None: ...
+
+    def unload(self) -> None: ...

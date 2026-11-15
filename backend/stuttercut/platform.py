@@ -35,6 +35,17 @@ def free_ram_gb() -> float:
     return float(psutil.virtual_memory().available) / 2**30
 
 
+def free_vram_gb() -> float | None:
+    """Free memory on the current CUDA device, all processes counted; None without CUDA."""
+    import sys
+
+    torch = sys.modules.get("torch")  # only meaningful once the ASR model put torch on CUDA
+    if torch is None or not torch.cuda.is_available():
+        return None
+    free, _total = torch.cuda.mem_get_info()
+    return float(free) / 2**30
+
+
 def preflight_model_size(cfg: AsrConfig, free_gb: float | None = None) -> str:
     """Model size to load given free RAM: configured size, the fallback, or an error."""
     free = free_ram_gb() if free_gb is None else free_gb

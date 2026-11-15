@@ -1,4 +1,8 @@
-"""The steps for one job: extract_audio -> transcribe -> detect (ADR 0002, 0003).
+"""The steps for one job: extract_audio -> transcribe -> detect [-> llm_review] (ADR 0002/0003).
+
+llm_review runs only when an LLM client is given (STUTTERCUT_LLM_ENABLED=true and a key). If
+it fails, the job keeps its rules-only cuts and tiers: WARN log, span error, still
+ready_for_review (design: "LLM fails -> rules-only").
 
 Status: processing -> transcribed -> ready_for_review, or failed + failed_step. Every step
 records a span; any error is logged with the job id. Words and detected cuts are replaced on
@@ -11,6 +15,8 @@ from pathlib import Path
 
 from stuttercut.asr import Transcriber
 from stuttercut.config import Config
+from stuttercut.llm import LLMClient
+from stuttercut.llm.review import review
 from stuttercut.media.audio import MediaError, extract_audio
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
@@ -45,12 +51,46 @@ def _detect(conn: sqlite3.Connection, cfg: Config, job_id: str, vad: VoiceDetect
             log.warning("VAD failed; detecting from words only", exc_info=True,
                         extra={"job_id": job_id})  # fmt: skip
     cuts = detect(verbatim, cfg.rules, intended=intended, voiced=voiced)
-    stored = repo.replace_cuts(conn, job_id, cuts)
+    stored = repo.replace_cuts(conn, job_id, cuts, cfg.rules.tier_sure_min)
     log.info(
         "cuts detected",
         extra={"job_id": job_id, "cuts": stored, "vad": voiced is not None,
                "diff": intended is not None},
     )  # fmt: skip
+
+
+def _llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClient) -> None:
+    """Send transcript text + candidates (no media, no paths) and store verdicts/retakes."""
+    repo.clear_llm_cuts(conn, job_id)  # a re-run replaces the LLM's own earlier proposals
+    words = repo.get_words(conn, job_id, "verbatim")
+    rows = [r for r in repo.get_cuts(conn, job_id) if not r["kept"]]
+    outcome = review(words, rows, llm, cfg.llm, cfg.rules.tier_sure_min)
+    for cut_id, final, tier_, verdict, llm_conf, reason in outcome.updates:
+        repo.apply_review(conn, cut_id, final, tier_, verdict, llm_conf, reason)
+    for cut, tier_, reason in outcome.new_cuts:
+        repo.add_llm_cut(conn, job_id, cut, tier_, reason)
+    cost = outcome.cost_usd(cfg.llm)
+    repo.update_job(
+        conn, job_id, llm_input_tokens=outcome.input_tokens,
+        llm_output_tokens=outcome.output_tokens, llm_cost_usd=cost,
+    )  # fmt: skip
+    keeps = sum(u[3] == "keep" for u in outcome.updates)
+    log.info(
+        "llm review done",
+        extra={"job_id": job_id, "model": llm.model, "requests": outcome.requests,
+               "input_tokens": outcome.input_tokens, "output_tokens": outcome.output_tokens,
+               "cost_usd": cost, "judged": len(outcome.updates), "keep": keeps,
+               "new_retakes": len(outcome.new_cuts), "ignored": outcome.ignored},
+    )  # fmt: skip
+
+
+def _try_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClient) -> None:
+    try:
+        with span(conn, job_id, "llm_review"):
+            _llm_review(conn, cfg, job_id, llm)
+    except Exception:  # never fails the job: rules-only cuts stay
+        log.warning("LLM review failed; keeping rules-only cuts", exc_info=True,
+                    extra={"job_id": job_id, "step": "llm_review"})  # fmt: skip
 
 
 def run_job(
@@ -59,6 +99,7 @@ def run_job(
     job_id: str,
     transcriber: Transcriber,
     vad: VoiceDetector | None = None,
+    llm: LLMClient | None = None,
 ) -> str:
     """Run all steps; returns the final status (``ready_for_review`` or ``failed``)."""
     job = repo.get_job(conn, job_id)
@@ -86,6 +127,8 @@ def run_job(
             return _fail(conn, job_id, step, e)
         finally:
             repo.update_job(conn, job_id, peak_rss_mb=rss.peak_mb)
+        if llm is not None:
+            _try_llm_review(conn, cfg, job_id, llm)
     repo.set_status(conn, job_id, "ready_for_review")
     log.info("job ready for review", extra={"job_id": job_id, **repo.word_counts(conn, job_id)})
     return "ready_for_review"
@@ -101,4 +144,10 @@ def run_detect(
     except Exception as e:
         return _fail(conn, job_id, "detect", e)
     repo.set_status(conn, job_id, "ready_for_review")
+    return "ready_for_review"
+
+
+def run_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMClient) -> str:
+    """Re-run only the LLM review on the stored candidates (rules-only cuts stay on failure)."""
+    _try_llm_review(conn, cfg, job_id, llm)
     return "ready_for_review"

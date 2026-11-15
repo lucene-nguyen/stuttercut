@@ -210,3 +210,72 @@ def test_detect_survives_vad_failure(
     vad = FakeVad(error=RuntimeError("bad audio"))
     assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), vad) == "ready_for_review"
     assert repo.cut_counts(conn, job_id, "source") == {"rules": 2}
+
+
+def _llm_judges_all(prompt: str) -> str:
+    """Fake LLM: keeps every filler, cuts everything else, proposes one retake (words 5-6)."""
+    import json
+
+    verdicts = []
+    for line in prompt.splitlines():
+        if line.startswith("{"):
+            cand = json.loads(line)
+            keep = cand["reason"] == "filler"
+            verdicts.append({"id": cand["id"], "verdict": "keep" if keep else "cut",
+                             "confidence": 0.9, "reason": "test"})  # fmt: skip
+    retakes = [{"first_word": 5, "last_word": 6, "confidence": 0.8, "reason": "restart"}]
+    return json.dumps({"verdicts": verdicts, "retakes": retakes})
+
+
+def test_llm_review_disabled_keeps_rules_only_tiers(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    job_id = repo.create_job(conn, str(make_video()))
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, None) == "ready_for_review"
+    assert "llm_review" not in [s for s, _ in spans(conn, job_id)]
+    assert repo.cut_counts(conn, job_id, "tier") == {"sure": 2}  # rule confidence 0.9 / 0.8
+    assert all(c["llm_verdict"] is None for c in repo.get_cuts(conn, job_id))
+
+
+def test_llm_review_updates_tiers_and_adds_retakes(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    from stuttercut.llm.fake import FakeLLMClient
+
+    video = make_video("bài nói.mp4")
+    job_id = repo.create_job(conn, str(video))
+    llm = FakeLLMClient(_llm_judges_all)
+
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, llm) == "ready_for_review"
+
+    assert spans(conn, job_id)[-1] == ("llm_review", "ok")
+    cuts = {c["reason"]: c for c in repo.get_cuts(conn, job_id)}
+    assert (cuts["filler"]["llm_verdict"], cuts["filler"]["tier"]) == ("keep", "unsure")
+    assert cuts["filler"]["rule_confidence"] == 0.9  # the candidate stays, only demoted
+    assert (cuts["repeat"]["llm_verdict"], cuts["repeat"]["tier"]) == ("cut", "sure")
+    assert cuts["retake"]["source"] == "llm"
+    job = repo.get_job(conn, job_id)
+    assert job is not None and job["llm_input_tokens"] == 100 and job["llm_cost_usd"] > 0
+    sent = "\n".join(call["prompt"] for call in llm.calls)
+    assert str(video) not in sent and "bài nói" not in sent and "0.65" not in sent  # text only
+
+
+def test_llm_failure_falls_back_to_rules_only(
+    cfg: Config,
+    conn: sqlite3.Connection,
+    make_video: Callable[..., Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from stuttercut.llm import LLMTimeout
+    from stuttercut.llm.fake import FakeLLMClient
+
+    job_id = repo.create_job(conn, str(make_video()))
+    llm = FakeLLMClient(LLMTimeout("no answer within 30 s"))
+
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURE), None, llm) == "ready_for_review"
+
+    job = repo.get_job(conn, job_id)
+    assert job is not None and job["status"] == "ready_for_review"
+    assert spans(conn, job_id)[-1] == ("llm_review", "error")
+    assert repo.cut_counts(conn, job_id, "tier") == {"sure": 2}
+    assert any(r.levelname == "WARNING" and r.job_id == job_id for r in caplog.records)  # type: ignore[attr-defined]

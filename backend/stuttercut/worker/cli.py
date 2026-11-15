@@ -15,7 +15,7 @@ from stuttercut.observability.logging import setup_logging
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.storage import paths, repo
 from stuttercut.storage.db import connect
-from stuttercut.worker.main import load_transcriber, load_vad
+from stuttercut.worker.main import load_llm, load_transcriber, load_vad
 from stuttercut.worker.pipeline import run_job
 
 
@@ -48,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
             f"loaded in {load_s:.1f} s"
         )
         vad = load_vad(cfg)
-        status = run_job(conn, cfg, job_id, transcriber, vad)
+        llm = load_llm(cfg)
+        status = run_job(conn, cfg, job_id, transcriber, vad, llm)
 
     for s in repo.get_spans(conn, job_id):
         print(f"  {s['step']:<14} {s['duration_s']:>7.2f} s  {s['status']}")
@@ -68,11 +69,21 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"peak RSS {rss.peak_mb} MB" + (f", peak VRAM {vram} MB (torch reserved)" if vram else "")
     )
-    for by in ("reason", "source"):
+    for by in ("reason", "source", "tier"):
         by_count = repo.cut_counts(conn, job_id, by)
         listed = ", ".join(f"{k} {n}" for k, n in sorted(by_count.items())) or "none"
         print(f"cuts by {by}: {listed} (total {sum(by_count.values())})")
     print(f"vad {'silero' if vad else 'off'}")
+    if llm is None:
+        print("llm review off (STUTTERCUT_LLM_ENABLED=false or no LLM_API_KEY)")
+    else:
+        cuts = repo.get_cuts(conn, job_id)
+        keeps = sum(c["llm_verdict"] == "keep" for c in cuts)
+        new = sum(c["source"] == "llm" for c in cuts)
+        print(
+            f"llm {llm.model}: tokens in {job['llm_input_tokens']} out {job['llm_output_tokens']}, "
+            f"cost ${job['llm_cost_usd']}, verdict keep {keeps}, new retakes {new}"
+        )
     print(f"db {paths.db_path(cfg)}\nlog {log_file}")
     conn.close()
     return 0 if status == "ready_for_review" else 1

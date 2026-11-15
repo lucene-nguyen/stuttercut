@@ -94,6 +94,8 @@ cd frontend && npm install
 uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
 pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
 python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word + cut counts, peak RAM (no text)
+python -m stuttercut.worker.cli render latest --approve sure --format both
+                                                     # <name>_clean.mp4 / .xml in STUTTERCUT_OUTPUT_DIR (default Videos/StutterCut)
 # LLM review: install Ollama, `ollama pull qwen3:8b`, set STUTTERCUT_LLM_ENABLED=true (docs/guides/local-llm.md);
 #   the CLI then prints tiers, tokens, Ollama RAM/VRAM and the ASR reload cost. Anthropic: PROVIDER=anthropic + LLM_API_KEY
 cd frontend && npm run dev                           # UI on 127.0.0.1:5173, proxies /api

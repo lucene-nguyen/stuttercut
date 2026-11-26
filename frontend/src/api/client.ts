@@ -148,3 +148,84 @@ export function watchJob(
   }
   return () => source.close()
 }
+
+// --- Diagnostics (LEARNING-228/229) ---
+
+export interface Metrics {
+  days: number
+  jobs: number
+  by_status: Record<string, number>
+  success_rate: number | null
+  failures_by_step: Record<string, number>
+  avg_step_s: Record<string, number>
+  avg_processing_s: number | null
+  avg_clip_s: number | null
+  peak_rss_mb: number | null
+  peak_rss_job: string | null
+}
+
+export interface TraceSpan {
+  step: string
+  status: 'ok' | 'error'
+  error: string | null
+  started_at: string
+  duration_s: number
+  offset_s: number
+}
+
+export interface Trace {
+  id: string
+  name: string
+  status: Status
+  failed_step: string | null
+  error: string | null
+  created_at: string
+  total_s: number
+  spans: TraceSpan[]
+  errors: { ts?: string; msg?: string; step?: string; exc?: string; ffmpeg_stderr?: string }[]
+}
+
+export interface LogEntry {
+  ts: string
+  level: string
+  logger?: string
+  msg: string
+  job_id?: string
+  step?: string
+  [key: string]: unknown
+}
+
+export interface Environment {
+  os: string
+  machine: string
+  cpu_count: number
+  ram_gb: number
+  python: string
+  ffmpeg: string | null
+  packages: Record<string, string | null>
+  settings: Record<string, Record<string, unknown>>
+  log_dir: string
+}
+
+export const diagnosticsApi = {
+  metrics: () => request<Metrics>('/api/metrics'),
+  trace: (id: string) => request<Trace>(`/api/jobs/${id}/trace`),
+  logs: () => request<LogEntry[]>('/api/logs?limit=500'),
+  environment: () => request<Environment>('/api/diagnostics/environment'),
+  openLogFolder: () => request<void>('/api/logs/open-folder', { method: 'POST' }),
+  /** Downloads the zip through the browser (no transcripts inside). */
+  async exportZip(): Promise<string> {
+    const res = await fetch('/api/diagnostics/export', { method: 'POST' })
+    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`)
+    const name =
+      /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ??
+      'stuttercut-diagnostics.zip'
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    return name
+  },
+}

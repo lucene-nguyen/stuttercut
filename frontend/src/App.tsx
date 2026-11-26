@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { api } from './api/client'
 import Header from './components/Header'
+import Diagnostics from './features/diagnostics/Diagnostics'
 import Review from './features/review/Review'
 import UploadJobs from './features/upload/UploadJobs'
 import { parseRoute } from './routes'
@@ -26,14 +27,7 @@ export default function App() {
   return (
     <>
       <Header current={route.page} />
-      {route.page === 'diagnostics' ? (
-        <main className="page">
-          <h1>Diagnostics</h1>
-          <p className="muted">Metrics, traces and logs arrive with LEARNING-229.</p>
-        </main>
-      ) : (
-        <UploadJobs platform={platform} />
-      )}
+      {route.page === 'diagnostics' ? <Diagnostics /> : <UploadJobs platform={platform} />}
     </>
   )
 }

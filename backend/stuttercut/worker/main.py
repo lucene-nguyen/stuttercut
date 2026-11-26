@@ -7,13 +7,14 @@ renders; ``("retry", job_id)`` re-runs from the failed step. One message at a ti
 """
 
 import logging
+import queue
 import sqlite3
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from stuttercut.asr import Transcriber
+from stuttercut.asr import Transcriber, Unloadable
 from stuttercut.config import Config, load_config
 from stuttercut.llm import LLMClient, LLMError
 from stuttercut.media.vad import VoiceDetector
@@ -30,7 +31,7 @@ Message = str | tuple[str, ...]
 
 
 class JobQueue(Protocol):
-    def get(self) -> Message | None: ...
+    def get(self, block: bool = True, timeout: float | None = None) -> Message | None: ...
 
 
 def load_transcriber(cfg: Config) -> Transcriber:
@@ -143,8 +144,18 @@ def worker_main(
     except Exception as e:  # e.g. InsufficientMemoryError: fail jobs clearly, keep serving
         log.error("ASR model failed to load", exc_info=True)
         transcriber, load_error, vad, llm = None, f"{type(e).__name__}: {e}", None, None
+    idle_s = cfg.limits.model_idle_unload_s
     try:
-        while (msg := job_queue.get()) is not None:
+        while True:
+            try:
+                msg = job_queue.get(timeout=idle_s) if idle_s > 0 else job_queue.get()
+            except queue.Empty:  # idle: give the model's memory back; the next job reloads it
+                if isinstance(transcriber, Unloadable) and transcriber.loaded:
+                    transcriber.unload()
+                    log.info("ASR model unloaded after idle", extra={"idle_s": idle_s})
+                continue
+            if msg is None:
+                break
             handle(conn, cfg, msg, transcriber, vad, llm, load_error)
     finally:
         conn.close()

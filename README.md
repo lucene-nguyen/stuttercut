@@ -30,9 +30,12 @@ cd frontend && npm install
 ## Run
 
 ```bash
-uvicorn stuttercut.api.main:app --reload     # API on http://127.0.0.1:8000
+uvicorn stuttercut.api.main:app             # API on http://127.0.0.1:8000, starts the worker process
 cd frontend && npm run dev                   # UI on http://127.0.0.1:5173 (proxies /api)
 ```
+
+Open http://127.0.0.1:5173, drop a video (≤ 3 min), review the suggested cuts, render.
+Review keys: Space play, ←/→ previous/next cut, K keep, X cut, Enter render.
 
 ## Quality checks
 
@@ -41,6 +44,7 @@ ruff check . && ruff format --check .
 mypy backend
 pytest
 cd frontend && npm run lint && npm test
+cd frontend && npm run e2e                   # Playwright + axe (fake transcriber); PW_CHANNEL=chrome uses the installed Chrome
 ```
 
 ## Documentation

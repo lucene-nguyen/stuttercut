@@ -153,6 +153,17 @@ def to_markdown(summary: dict[str, Any], skipped: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def newest_job(conn: sqlite3.Connection, media: str) -> sqlite3.Row | None:
+    """The CLI stores the clip's own path; the app stores an uploaded copy with the same name."""
+    rows = conn.execute(
+        "SELECT id, source_path FROM job WHERE status IN ('ready_for_review', 'done')"
+        " ORDER BY created_at DESC"
+    )
+    name = Path(media).name
+    same = (r for r in rows if r["source_path"] == media or Path(r["source_path"]).name == name)
+    return next(same, None)
+
+
 def load_clips(
     conn: sqlite3.Connection, root: Path, labels_dir: Path, clip_ids: list[str]
 ) -> tuple[dict[str, tuple[list[Span], list[Span]]], dict[str, str]]:
@@ -168,17 +179,15 @@ def load_clips(
         except FileNotFoundError:
             skipped[clip_id] = "media file not found"
             continue
-        job = conn.execute(
-            "SELECT id FROM job WHERE source_path = ? AND status = 'ready_for_review'"
-            " ORDER BY created_at DESC LIMIT 1",
-            (media,),
-        ).fetchone()
+        job = newest_job(conn, media)
         if job is None:
-            skipped[clip_id] = "no ready_for_review job (run python -m stuttercut.worker.cli)"
+            skipped[clip_id] = "no reviewed or rendered job (run the CLI or upload it in the app)"
             continue
-        preds = [
+        preds = [  # what the detector proposed, whatever the user decided; not hand-marked cuts
             {"start": r["start_s"], "end": r["end_s"], "reason": r["reason"], "source": r["source"]}
-            for r in conn.execute("SELECT * FROM cut WHERE job_id = ? AND kept = 0", (job["id"],))
+            for r in conn.execute(
+                "SELECT * FROM cut WHERE job_id = ? AND source != 'user'", (job["id"],)
+            )
         ]
         labels = json.loads(label_file.read_text(encoding="utf-8"))["cuts"]
         clips[clip_id] = (preds, labels)

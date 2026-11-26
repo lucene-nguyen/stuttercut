@@ -158,7 +158,7 @@ def test_worker_main_runs_queued_jobs_one_at_a_time(
     assert len(loads) == 1  # model loaded once, reused for every job
     statuses = {j: repo.get_job(conn, j)["status"] for j in (ok_job, bad_job)}  # type: ignore[index]
     assert statuses == {ok_job: "ready_for_review", bad_job: "failed"}
-    assert (paths.log_dir(cfg) / "app.jsonl").exists()
+    assert (paths.log_dir(cfg) / "worker.jsonl").exists()
 
 
 def test_worker_main_fails_jobs_when_model_cannot_load(

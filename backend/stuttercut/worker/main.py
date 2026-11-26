@@ -132,7 +132,7 @@ def worker_main(
     make_llm: Callable[[Config], LLMClient | None] = load_llm,
 ) -> None:
     cfg = cfg or load_config()
-    setup_logging(paths.log_dir(cfg), cfg.log)
+    setup_logging(paths.log_dir(cfg), cfg.log, "worker")
     lower_priority(cfg.worker_nice)
     conn = connect(paths.db_path(cfg))
     try:

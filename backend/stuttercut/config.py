@@ -212,6 +212,7 @@ class Config:
     render: RenderConfig = field(default_factory=RenderConfig)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
+    ui_dir: Path | None = None  # built UI the API serves at /; None = <repo>/frontend/dist
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
 
@@ -307,6 +308,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
                 shown = "***" if name.endswith("API_KEY") else repr(raw)
                 raise ValueError(f"{name}={shown} is not a valid {kind}") from e
     home = values.get("STUTTERCUT_HOME")
+    ui_dir = values.get("STUTTERCUT_UI_DIR")
     nice = values.get("STUTTERCUT_WORKER_NICE")
     return Config(
         asr=AsrConfig(**sections["asr"]),  # type: ignore[arg-type]
@@ -317,5 +319,6 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
         render=RenderConfig(**sections["render"]),  # type: ignore[arg-type]
         limits=LimitsConfig(**sections["limits"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
+        ui_dir=Path(ui_dir).expanduser() if ui_dir else None,
         worker_nice=int(nice) if nice else 10,
     )

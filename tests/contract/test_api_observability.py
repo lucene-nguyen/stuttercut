@@ -103,3 +103,21 @@ def test_environment_names_the_log_folder_and_open_folder_opens_it(api: Api, cfg
     assert env["log_dir"] == str(paths.log_dir(cfg)) and env["ram_gb"] > 0
     assert client.post("/api/logs/open-folder").status_code == 204
     assert opened == [paths.log_dir(cfg)]
+
+
+def test_the_api_serves_the_built_ui_but_api_routes_win(cfg: Config, tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from stuttercut.api.main import create_app
+    from tests.contract.conftest import InlineWorker
+
+    ui = tmp_path / "dist"
+    ui.mkdir()
+    (ui / "index.html").write_text("<title>StutterCut</title>", "utf-8")
+    cfg = replace(cfg, ui_dir=ui)
+    with TestClient(create_app(cfg, worker=InlineWorker(cfg))) as client:
+        assert "StutterCut" in client.get("/").text
+        assert client.get("/api/health").json()["status"] == "ok"
+        assert client.get("/api/jobs").json() == []

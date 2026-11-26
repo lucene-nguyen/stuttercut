@@ -125,3 +125,18 @@ def test_unknown_llm_provider_is_rejected() -> None:
 def test_bad_llm_values_do_not_echo_the_key() -> None:
     with pytest.raises(ValueError, match="STUTTERCUT_LLM_ENABLED"):
         load_config(env={"STUTTERCUT_LLM_ENABLED": "maybe"}, dotenv=Path("missing.env"))
+
+
+def test_step_timeouts_scale_with_clip_length() -> None:
+    from stuttercut.config import LimitsConfig
+
+    lim = LimitsConfig()
+    assert lim.step_timeout_s("transcribe", 180) == 60 + 1.5 * 180  # 5.5 min for 3 min
+    assert lim.step_timeout_s("render", 120) == 180
+    assert lim.step_timeout_s("detect", 100) == 110
+    assert lim.step_timeout_s("load_model", 180) == 300  # not scaled
+    assert lim.step_timeout_s("transcribe", None) == 60 + 1.5 * 180  # unknown length: 3 min
+    on = load_config(
+        env={"STUTTERCUT_WORKER_MAX_RSS_GB": "10", "STUTTERCUT_MODEL_IDLE_UNLOAD_S": "0"}
+    )
+    assert (on.limits.worker_max_rss_gb, on.limits.model_idle_unload_s) == (10.0, 0.0)

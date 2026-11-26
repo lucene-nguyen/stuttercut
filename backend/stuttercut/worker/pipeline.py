@@ -36,7 +36,7 @@ from stuttercut.media.render import RenderError, plan, removed_s, render_mp4, vi
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.observability.spans import span
-from stuttercut.platform import free_ram_gb, free_vram_gb
+from stuttercut.platform import free_ram_gb, free_vram_gb, preflight_model_size
 from stuttercut.rules import Interval
 from stuttercut.rules.detect import detect
 from stuttercut.storage import paths, repo
@@ -189,8 +189,9 @@ def run_job(
             with span(conn, job_id, step):
                 make_preview(Path(job["source_path"]), wav.with_name("preview.mp4"), cfg.media)
             if isinstance(transcriber, Unloadable) and not transcriber.loaded:
-                step = "load_model"  # freed for the local LLM after the previous job
+                step = "load_model"  # freed for the local LLM, or after idle
                 with span(conn, job_id, step):
+                    preflight_model_size(cfg.asr)  # clear error instead of running out of RAM
                     transcriber.load()
             step = "transcribe"
             with span(conn, job_id, step):

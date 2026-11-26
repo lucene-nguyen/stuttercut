@@ -168,6 +168,34 @@ class RenderConfig:
 
 
 @dataclass(frozen=True)
+class LimitsConfig:
+    """Worker limits the API's watchdog enforces (LEARNING-235). A step over its timeout or a
+    worker over its memory limit is killed; the job fails with that reason, the worker restarts."""
+
+    worker_max_rss_gb: float = 12.0  # worker + its FFmpeg children; a 16 GB Mac keeps 4 GB
+    watchdog_interval_s: float = 1.0
+    kill_grace_s: float = 5.0  # terminate, then kill after this
+    # Step timeout = base + factor x clip length (seconds). Design: 3 min transcribe, 2 min render
+    # for a 3-minute clip on the Mac; the factors leave room for a slower first run.
+    step_timeout_base_s: float = 60.0
+    transcribe_timeout_x: float = 1.5
+    llm_timeout_x: float = 1.0
+    render_timeout_x: float = 1.0
+    other_timeout_x: float = 0.5
+    load_model_timeout_s: float = 300.0  # model load: not scaled by clip length
+    model_idle_unload_s: float = (
+        600.0  # free the ASR model after this long without a job; 0 = never
+    )
+
+    def step_timeout_s(self, step: str, clip_s: float | None) -> float:
+        if step in ("load_model", "llm_load"):
+            return self.load_model_timeout_s
+        x = {"transcribe": self.transcribe_timeout_x, "llm_review": self.llm_timeout_x,
+             "render": self.render_timeout_x}.get(step, self.other_timeout_x)  # fmt: skip
+        return self.step_timeout_base_s + x * (clip_s or 180.0)
+
+
+@dataclass(frozen=True)
 class LogConfig:
     level: str = "INFO"
     max_bytes: int = 5 * 1024 * 1024
@@ -182,6 +210,7 @@ class Config:
     rules: RulesConfig = field(default_factory=RulesConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
+    limits: LimitsConfig = field(default_factory=LimitsConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
@@ -249,6 +278,16 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_JOIN_FADE_MS": ("render", "join_fade_ms", int),
     "STUTTERCUT_ENCODER": ("render", "encoder", str),
     "STUTTERCUT_OUTPUT_DIR": ("render", "output_dir", Path),
+    "STUTTERCUT_WORKER_MAX_RSS_GB": ("limits", "worker_max_rss_gb", float),
+    "STUTTERCUT_WATCHDOG_INTERVAL_S": ("limits", "watchdog_interval_s", float),
+    "STUTTERCUT_KILL_GRACE_S": ("limits", "kill_grace_s", float),
+    "STUTTERCUT_STEP_TIMEOUT_BASE_S": ("limits", "step_timeout_base_s", float),
+    "STUTTERCUT_TRANSCRIBE_TIMEOUT_X": ("limits", "transcribe_timeout_x", float),
+    "STUTTERCUT_LLM_TIMEOUT_X": ("limits", "llm_timeout_x", float),
+    "STUTTERCUT_RENDER_TIMEOUT_X": ("limits", "render_timeout_x", float),
+    "STUTTERCUT_OTHER_TIMEOUT_X": ("limits", "other_timeout_x", float),
+    "STUTTERCUT_LOAD_MODEL_TIMEOUT_S": ("limits", "load_model_timeout_s", float),
+    "STUTTERCUT_MODEL_IDLE_UNLOAD_S": ("limits", "model_idle_unload_s", float),
 }
 
 
@@ -256,7 +295,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
     """Defaults, then .env, then the environment (or ``env`` when given, for tests)."""
     values = {**read_dotenv(dotenv), **(os.environ if env is None else env)}
     sections: dict[str, dict[str, object]] = {
-        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {}, "render": {},
+        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {}, "render": {}, "limits": {},
     }  # fmt: skip
     for name, (section, key, cast) in _ENV.items():
         raw = values.get(name)
@@ -276,6 +315,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
         rules=RulesConfig(**sections["rules"]),  # type: ignore[arg-type]
         llm=LlmConfig(**sections["llm"]),  # type: ignore[arg-type]
         render=RenderConfig(**sections["render"]),  # type: ignore[arg-type]
+        limits=LimitsConfig(**sections["limits"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
         worker_nice=int(nice) if nice else 10,
     )

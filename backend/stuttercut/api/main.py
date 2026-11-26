@@ -14,7 +14,7 @@ from typing import Protocol
 from fastapi import FastAPI
 
 from stuttercut.api.routes import health, jobs, observability
-from stuttercut.api.worker_proc import WorkerHandle
+from stuttercut.api.worker_proc import WorkerHandle, fail_running, pending_messages
 from stuttercut.config import Config, load_config
 from stuttercut.observability.logging import setup_logging
 from stuttercut.storage import paths
@@ -58,8 +58,15 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         setup_logging(paths.log_dir(cfg), cfg.log, "api")
-        connect(paths.db_path(cfg)).close()  # migrate before the worker opens the DB
+        conn = connect(paths.db_path(cfg))  # migrate before the worker opens the DB
+        try:  # after a crash or restart: what was running failed; what was waiting runs
+            fail_running(conn, "interrupted: StutterCut stopped while this step ran")
+            pending = pending_messages(conn)
+        finally:
+            conn.close()
         app.state.worker.start()
+        for msg in pending:
+            app.state.worker.put(msg)
         yield
         app.state.worker.stop()
 

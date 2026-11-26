@@ -17,4 +17,5 @@ Prompts given to Claude Code for each Jira task, kept so we can reuse what worke
 | LEARNING-210 | [Render and FCP XML](LEARNING-210-render.md) | [#6](https://github.com/lucene-nguyen/stuttercut/pull/6) |
 | LEARNING-209 | [Review UI](LEARNING-209-review-ui.md) | [#7](https://github.com/lucene-nguyen/stuttercut/pull/7) |
 | LEARNING-228 | [Observability](LEARNING-228-observability.md) | [#8](https://github.com/lucene-nguyen/stuttercut/pull/8) |
-| LEARNING-229 | [Diagnostics screen](LEARNING-229-diagnostics-screen.md) | — |
+| LEARNING-229 | [Diagnostics screen](LEARNING-229-diagnostics-screen.md) | [#9](https://github.com/lucene-nguyen/stuttercut/pull/9) |
+| LEARNING-235 | [Resource limits](LEARNING-235-resource-limits.md) | — |

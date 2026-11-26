@@ -61,3 +61,24 @@ def test_peak_rss_sees_allocation() -> None:
         before_exit = rss.peak_mb
     assert rss.peak_mb >= before_exit > 0
     assert len(block) == 50 * 2**20
+
+
+def test_read_logs_merges_files_skips_broken_lines_and_filters(tmp_path: Path) -> None:
+    from stuttercut.observability.diagnostics import read_logs
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "api.jsonl").write_text(
+        '{"ts": "2026-11-26T10:00:02.000", "level": "INFO", "msg": "b", "job_id": "j1"}\n'
+        '{"ts": "2026-11-26T10:00:0',  # cut by a crash
+        encoding="utf-8",
+    )
+    (logs / "worker.jsonl.1").write_text(
+        '{"ts": "2026-11-26T10:00:01.000", "level": "WARNING", "msg": "a", "job_id": "j2"}\n'
+        '{"ts": "2026-11-26T10:00:03.000", "level": "ERROR", "msg": "c", "job_id": "j1"}\n',
+        encoding="utf-8",
+    )
+    assert [e["msg"] for e in read_logs(logs)] == ["c", "b", "a"]
+    assert [e["msg"] for e in read_logs(logs, level="WARN")] == ["a"]
+    assert [e["msg"] for e in read_logs(logs, job="j1", limit=1)] == ["c"]
+    assert read_logs(tmp_path / "missing") == []

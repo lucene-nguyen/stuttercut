@@ -19,4 +19,5 @@ Prompts given to Claude Code for each Jira task, kept so we can reuse what worke
 | LEARNING-228 | [Observability](LEARNING-228-observability.md) | [#8](https://github.com/lucene-nguyen/stuttercut/pull/8) |
 | LEARNING-229 | [Diagnostics screen](LEARNING-229-diagnostics-screen.md) | [#9](https://github.com/lucene-nguyen/stuttercut/pull/9) |
 | LEARNING-235 | [Resource limits](LEARNING-235-resource-limits.md) | [#10](https://github.com/lucene-nguyen/stuttercut/pull/10) |
-| LEARNING-233 | [Cross-platform](LEARNING-233-cross-platform.md) | — |
+| LEARNING-233 | [Cross-platform](LEARNING-233-cross-platform.md) | [#11](https://github.com/lucene-nguyen/stuttercut/pull/11) |
+| LEARNING-204 | [v1 batch and acceptance test](LEARNING-204-v1-batch.md) | — |

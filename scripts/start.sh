@@ -15,6 +15,7 @@ if [ ! -x "$PY" ]; then
   echo "No .venv found. Set up first: docs/guides/setup-mac.md (python3.11 -m venv .venv ...)" >&2
   exit 1
 fi
+export PYTHONPATH="$PWD/backend${PYTHONPATH:+:$PYTHONPATH}" # same import path as the .venv install
 for tool in ffmpeg ffprobe node npm; do
   command -v "$tool" >/dev/null || { echo "$tool is not installed (see the setup guide)." >&2; exit 1; }
 done

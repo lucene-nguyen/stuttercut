@@ -9,6 +9,9 @@ $port = if ($env:STUTTERCUT_PORT) { $env:STUTTERCUT_PORT } else { '8000' }
 $url = "http://127.0.0.1:$port"
 
 $py = Join-Path (Get-Location) '.venv\Scripts\python.exe'
+# Python 3.11 reads the editable install's .pth file as cp1252, so a checkout path with
+# Vietnamese letters is not importable; PYTHONPATH reaches Python as Unicode (lesson 005).
+$env:PYTHONPATH = (Join-Path (Get-Location) 'backend') + $(if ($env:PYTHONPATH) { ";$env:PYTHONPATH" } else { '' })
 if (-not (Test-Path $py)) {
     Write-Error 'No .venv found. Set up first: docs\guides\setup-windows.md (py -3.11 -m venv .venv ...)'
 }

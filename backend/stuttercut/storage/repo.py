@@ -43,7 +43,7 @@ def set_status(
 
 def update_job(conn: sqlite3.Connection, job_id: str, **fields: object) -> None:
     allowed = {
-        "duration_s", "output_path", "peak_rss_mb",
+        "duration_s", "output_path", "xml_path", "peak_rss_mb",
         "llm_input_tokens", "llm_output_tokens", "llm_cost_usd",
     }  # fmt: skip
     if not fields or not set(fields) <= allowed:
@@ -192,6 +192,41 @@ def cut_counts(conn: sqlite3.Connection, job_id: str, by: str) -> dict[str, int]
         (job_id,),
     )
     return {r["k"]: r["n"] for r in rows}
+
+
+APPROVE_MODES = ("sure", "all", "none")
+
+
+def approve_cuts(conn: sqlite3.Connection, job_id: str, mode: str) -> int:
+    """Mark which active cuts (kept=0) render applies: sure tier, all, or none. Returns count."""
+    if mode not in APPROVE_MODES:
+        raise ValueError(f"approve must be one of {APPROVE_MODES}, got {mode!r}")
+    with conn:
+        conn.execute(
+            "UPDATE cut SET approved = CASE WHEN kept = 0 AND (? = 'all' OR (? = 'sure'"
+            " AND tier = 'sure')) THEN 1 ELSE 0 END WHERE job_id = ?",
+            (mode, mode, job_id),
+        )
+    return len(approved_cuts(conn, job_id))
+
+
+def approved_cuts(conn: sqlite3.Connection, job_id: str) -> list[tuple[float, float]]:
+    """(start, end) of the cuts render applies: approved and not kept by the user."""
+    rows = conn.execute(
+        "SELECT start_s, end_s FROM cut WHERE job_id = ? AND approved = 1 AND kept = 0"
+        " ORDER BY start_s",
+        (job_id,),
+    )
+    return [(r["start_s"], r["end_s"]) for r in rows]
+
+
+def latest_job(conn: sqlite3.Connection) -> str | None:
+    """Newest job that can be rendered (ready_for_review, done, or failed at render)."""
+    row = conn.execute(
+        "SELECT id FROM job WHERE status IN ('ready_for_review', 'done')"
+        " OR (status = 'failed' AND failed_step = 'render') ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    return None if row is None else str(row["id"])
 
 
 def clear_llm_cuts(conn: sqlite3.Connection, job_id: str) -> None:

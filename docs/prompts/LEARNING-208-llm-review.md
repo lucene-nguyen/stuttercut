@@ -45,4 +45,18 @@ Commit with LEARNING-208, push, watch CI, do not merge. I will add an Anthropic 
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/5 (merged 2026-11-15).
+
+**Worked well**
+- One `LLMClient` protocol, two providers (Anthropic, Ollama) and a fake; strict JSON schema + pydantic, one retry, rules-only fallback on any failure.
+- Local by default: qwen3:8b on Ollama, ASR unloaded before the review when VRAM/RAM is short (llm_review 91 s → 48 s on the RTX 4060), model warmed under its own timeout, unloaded after.
+- `eval/llm_bench`: 35 synthetic cases measure verdicts without real voices; deterministic at temperature 0.
+
+**Had to be corrected or deviated from the prompt**
+- 300-word chunks timed out at 30 s on the local model; 150 + 30 overlap.
+- Wordless VAD candidates were sent as "silence"; fixed to "unwritten sound".
+- qwen3:8b judged meaningful "à"/"ừ" as cut and lifted them to `sure`; the merge became asymmetric (the LLM can only lower confidence).
+- Bench: first prompt 51% (said "cut" to everything), final 63%; thinking mode 71% but 40 s per case. No retakes found without thinking.
+
+**Next time**
+- Build the bench before tuning the prompt, and compare a second provider before choosing the merge rule.

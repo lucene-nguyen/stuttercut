@@ -8,6 +8,9 @@ the two models never sit in memory together on a 16 GB Mac. If the review fails,
 keeps its rules-only cuts and tiers: WARN log, span error, still ready_for_review
 (design: "LLM fails -> rules-only").
 
+Render (separate call, after review): ready_for_review | done | failed at render -> rendering
+-> done (output paths stored) or failed with failed_step=render; cuts are never touched.
+
 Status: processing -> transcribed -> ready_for_review, or failed + failed_step. Every step
 records a span; any error is logged with the job id. Words and detected cuts are replaced on
 a re-run (cuts the user kept are never touched), so retries are safe.
@@ -15,13 +18,16 @@ a re-run (cuts the user kept are never touched), so retries are safe.
 
 import logging
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from stuttercut.asr import Transcriber, Unloadable
-from stuttercut.config import Config, LlmConfig
+from stuttercut.config import RENDER_FORMATS, Config, LlmConfig
 from stuttercut.llm import LLMClient
 from stuttercut.llm.review import review
 from stuttercut.media.audio import MediaError, extract_audio
+from stuttercut.media.fcpxml import write_xml
+from stuttercut.media.render import RenderError, plan, removed_s, render_mp4, video_info
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.observability.spans import span
@@ -37,6 +43,8 @@ STEPS = ("extract_audio", "transcribe", "detect")
 
 def _fail(conn: sqlite3.Connection, job_id: str, step: str, e: Exception) -> str:
     extra: dict[str, object] = {"job_id": job_id, "step": step}
+    if isinstance(e, RenderError):
+        extra["render_step"] = e.step
     if isinstance(e, MediaError) and e.stderr:
         extra["ffmpeg_stderr"] = e.stderr[-4000:]
     log.error("job failed", exc_info=True, extra=extra)
@@ -207,3 +215,61 @@ def run_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMC
     """Re-run only the LLM review on the stored candidates (rules-only cuts stay on failure)."""
     _try_llm_review(conn, cfg, job_id, llm)
     return "ready_for_review"
+
+
+RENDERABLE = ("ready_for_review", "done")
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    status: str  # done | failed
+    approved: int = 0
+    removed_s: float = 0.0
+    output_s: float = 0.0
+    encoder: str | None = None
+    mp4: Path | None = None
+    xml: Path | None = None
+
+
+def run_render(
+    conn: sqlite3.Connection, cfg: Config, job_id: str, fmt: str = "mp4"
+) -> RenderResult:
+    """Approved, not-kept cuts -> <name>_clean.mp4 and/or .xml in the output folder."""
+    if fmt not in RENDER_FORMATS:
+        raise ValueError(f"format must be one of {RENDER_FORMATS}, got {fmt!r}")
+    job = repo.get_job(conn, job_id)
+    if job is None:
+        raise KeyError(f"no job {job_id}")
+    retry = job["status"] == "failed" and job["failed_step"] == "render"
+    if job["status"] not in RENDERABLE and not retry:
+        raise ValueError(f"job {job_id} is {job['status']}; render needs one of {RENDERABLE}")
+    repo.set_status(conn, job_id, "rendering")
+    cuts = repo.approved_cuts(conn, job_id)
+    source = Path(job["source_path"])
+    try:
+        with span(conn, job_id, "render"):
+            info = video_info(source)
+            if not info.has_audio:
+                raise RenderError("probe", f"{source.name} has no audio stream")
+            keeps = plan(cuts, info.duration_s, cfg.render, info.fps)
+            out_dir = paths.output_dir(cfg)
+            mp4 = xml = None
+            encoder = None
+            if fmt in ("mp4", "both"):
+                mp4, encoder = render_mp4(source, keeps, out_dir, cfg.render,
+                                          cfg.media.ffmpeg_threads)  # fmt: skip
+            if fmt in ("xml", "both"):
+                xml = write_xml(source, keeps, info, out_dir)
+    except Exception as e:
+        _fail(conn, job_id, "render", e)
+        return RenderResult("failed", approved=len(cuts))
+    repo.update_job(conn, job_id, output_path=str(mp4) if mp4 else None,
+                    xml_path=str(xml) if xml else None)  # fmt: skip
+    repo.set_status(conn, job_id, "done")
+    removed = removed_s(keeps, info.duration_s)
+    log.info(
+        "render done",
+        extra={"job_id": job_id, "format": fmt, "approved": len(cuts), "segments": len(keeps),
+               "removed_s": round(removed, 3), "encoder": encoder},
+    )  # fmt: skip
+    return RenderResult("done", len(cuts), removed, info.duration_s - removed, encoder, mp4, xml)

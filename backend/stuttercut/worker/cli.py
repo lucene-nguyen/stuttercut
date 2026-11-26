@@ -1,8 +1,12 @@
 """Manual run: python -m stuttercut.worker.cli <video>
+           python -m stuttercut.worker.cli render <job_id|latest> [--approve sure|all|none]
+                                              [--format mp4|xml|both]
 
-Creates a job, loads the real transcriber and VAD and runs the pipeline in this process. Prints
-the job id, device, step timings, word counts, cut counts per reason and source, and peak
-RSS/VRAM; never transcript text.
+The first creates a job, loads the real transcriber and VAD and runs the pipeline in this
+process. It prints the job id, device, step timings, word counts, cut counts per reason and
+source, and peak RSS/VRAM. ``render`` marks which cuts are approved (until the review UI does,
+LEARNING-209), renders and prints the approved cut count, removed seconds, output duration,
+encoder, render time and output paths. Neither prints transcript text.
 """
 
 import argparse
@@ -11,13 +15,13 @@ import time
 from pathlib import Path
 
 from stuttercut.asr import Unloadable
-from stuttercut.config import load_config
+from stuttercut.config import RENDER_FORMATS, load_config
 from stuttercut.observability.logging import setup_logging
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.storage import paths, repo
 from stuttercut.storage.db import connect
 from stuttercut.worker.main import load_llm, load_transcriber, load_vad
-from stuttercut.worker.pipeline import run_job
+from stuttercut.worker.pipeline import run_job, run_render
 
 
 def peak_vram_mb() -> int | None:
@@ -27,7 +31,54 @@ def peak_vram_mb() -> int | None:
     return round(int(torch.cuda.max_memory_reserved()) / 2**20)
 
 
+def render_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="stuttercut.worker.cli render")
+    parser.add_argument("job", help="job id, or 'latest'")
+    parser.add_argument(
+        "--approve",
+        choices=repo.APPROVE_MODES,
+        default="sure",
+        help="sure = only the sure tier; all; none = render as-is (baseline)",
+    )
+    parser.add_argument("--format", choices=RENDER_FORMATS, default="mp4")  # fmt: skip
+    args = parser.parse_args(argv)
+
+    cfg = load_config()
+    log_file = setup_logging(paths.log_dir(cfg), cfg.log)
+    conn = connect(paths.db_path(cfg))
+    job_id = repo.latest_job(conn) if args.job == "latest" else args.job
+    if job_id is None or repo.get_job(conn, job_id) is None:
+        parser.error(f"no renderable job {args.job!r}")
+    approved = repo.approve_cuts(conn, job_id, args.approve)
+    print(f"job {job_id}: approve {args.approve}, {approved} cuts approved", flush=True)
+    t0 = time.perf_counter()
+    try:
+        result = run_render(conn, cfg, job_id, args.format)
+    except ValueError as e:  # wrong status
+        print(e)
+        return 1
+    took = time.perf_counter() - t0
+    job = repo.get_job(conn, job_id)
+    assert job is not None
+    if result.status != "done":
+        print(f"status failed at {job['failed_step']}: {job['error']}")
+        print(f"log {log_file}")
+        return 1
+    print(f"removed {result.removed_s:.2f} s, output {result.output_s:.2f} s")
+    if result.mp4:
+        print(f"encoder {result.encoder}")
+    print(f"render time {took:.1f} s")
+    for p in (result.mp4, result.xml):
+        if p:
+            print(f"output {p}")
+    conn.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["render"]:
+        return render_main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("video", type=Path)
     args = parser.parse_args(argv)

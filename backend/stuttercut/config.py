@@ -143,6 +143,26 @@ class LlmConfig:
             object.__setattr__(self, "model", DEFAULT_MODELS[self.provider])
 
 
+RENDER_FORMATS = ("mp4", "xml", "both")
+ENCODERS = ("auto", "h264_videotoolbox", "h264_nvenc", "libx264")
+
+
+@dataclass(frozen=True)
+class RenderConfig:
+    """Render of the clean video and FCP XML export (LEARNING-210)."""
+
+    cut_padding_ms: int = 40  # each cut shrinks by this on both sides: no clipped syllable
+    cut_merge_ms: int = 50  # cuts closer than this become one
+    min_segment_ms: int = 80  # shorter keep-segments are dropped (cut too)
+    join_fade_ms: int = 10  # audio fade out/in at every join: no clicks
+    encoder: str = "auto"  # auto = h264_videotoolbox -> h264_nvenc -> libx264
+    output_dir: Path | None = None  # None = platformdirs user videos dir / StutterCut
+
+    def __post_init__(self) -> None:
+        if self.encoder not in ENCODERS:
+            raise ValueError(f"STUTTERCUT_ENCODER must be one of {ENCODERS}, got {self.encoder!r}")
+
+
 @dataclass(frozen=True)
 class LogConfig:
     level: str = "INFO"
@@ -157,6 +177,7 @@ class Config:
     log: LogConfig = field(default_factory=LogConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
+    render: RenderConfig = field(default_factory=RenderConfig)
     home: Path | None = None  # data root; None = platformdirs (see storage.paths)
     worker_nice: int = 10  # lower worker CPU priority so the machine stays usable
 
@@ -215,6 +236,12 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_LLM_EXPECTED_GB": ("llm", "expected_gb", float),
     "STUTTERCUT_LLM_VRAM_MARGIN_GB": ("llm", "vram_margin_gb", float),
     "STUTTERCUT_LLM_LOAD_TIMEOUT_S": ("llm", "load_timeout_s", float),
+    "STUTTERCUT_CUT_PADDING_MS": ("render", "cut_padding_ms", int),
+    "STUTTERCUT_CUT_MERGE_MS": ("render", "cut_merge_ms", int),
+    "STUTTERCUT_MIN_SEGMENT_MS": ("render", "min_segment_ms", int),
+    "STUTTERCUT_JOIN_FADE_MS": ("render", "join_fade_ms", int),
+    "STUTTERCUT_ENCODER": ("render", "encoder", str),
+    "STUTTERCUT_OUTPUT_DIR": ("render", "output_dir", Path),
 }
 
 
@@ -222,7 +249,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
     """Defaults, then .env, then the environment (or ``env`` when given, for tests)."""
     values = {**read_dotenv(dotenv), **(os.environ if env is None else env)}
     sections: dict[str, dict[str, object]] = {
-        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {},
+        "asr": {}, "media": {}, "log": {}, "rules": {}, "llm": {}, "render": {},
     }  # fmt: skip
     for name, (section, key, cast) in _ENV.items():
         raw = values.get(name)
@@ -241,6 +268,7 @@ def load_config(env: Mapping[str, str] | None = None, dotenv: Path = Path(".env"
         log=LogConfig(**sections["log"]),  # type: ignore[arg-type]
         rules=RulesConfig(**sections["rules"]),  # type: ignore[arg-type]
         llm=LlmConfig(**sections["llm"]),  # type: ignore[arg-type]
+        render=RenderConfig(**sections["render"]),  # type: ignore[arg-type]
         home=Path(home).expanduser() if home else None,
         worker_nice=int(nice) if nice else 10,
     )

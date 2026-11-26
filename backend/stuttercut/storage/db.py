@@ -69,6 +69,12 @@ MIGRATIONS: list[str] = [
     ALTER TABLE job ADD COLUMN llm_output_tokens INTEGER;
     ALTER TABLE job ADD COLUMN llm_cost_usd REAL;
     """,
+    # 4: render (LEARNING-210). approved = the cut counts for render (CLI --approve now, the
+    # review UI later); job.output_path holds the MP4, xml_path the FCP XML.
+    """
+    ALTER TABLE cut ADD COLUMN approved INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1));
+    ALTER TABLE job ADD COLUMN xml_path TEXT;
+    """,
 ]
 
 

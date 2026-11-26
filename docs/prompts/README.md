@@ -15,4 +15,5 @@ Prompts given to Claude Code for each Jira task, kept so we can reuse what worke
 | LEARNING-207 | [Cut detection](LEARNING-207-cut-detection.md) | [#4](https://github.com/lucene-nguyen/stuttercut/pull/4) |
 | LEARNING-208 | [LLM review of cuts](LEARNING-208-llm-review.md) | [#5](https://github.com/lucene-nguyen/stuttercut/pull/5) |
 | LEARNING-210 | [Render and FCP XML](LEARNING-210-render.md) | [#6](https://github.com/lucene-nguyen/stuttercut/pull/6) |
-| LEARNING-209 | [Review UI](LEARNING-209-review-ui.md) | — |
+| LEARNING-209 | [Review UI](LEARNING-209-review-ui.md) | [#7](https://github.com/lucene-nguyen/stuttercut/pull/7) |
+| LEARNING-228 | [Observability](LEARNING-228-observability.md) | — |

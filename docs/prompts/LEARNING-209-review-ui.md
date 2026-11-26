@@ -17,4 +17,18 @@ LEARNING-209 Review UI (screens 1–2 of the UI design, dark theme, English labe
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/7 (merged 2026-11-26, squash `89956aa`).
+
+**Worked well**
+- One app factory + an in-process worker for contract tests; the real spawned worker covered by one integration test.
+- Pure review logic (tokens, states, keys, preview skip) in `logic.ts` with vitest; screens stay thin.
+- Playwright + axe ran green on the first CI run: upload → review → render, 4-min error, decisions survive reload, no serious axe issues.
+
+**Had to be corrected or deviated from the prompt**
+- Upload is the raw request body (no `python-multipart` dependency); ffprobe validates in the API.
+- A suggestion is not cut until approved (X / Approve all sure); the design mock struck every suggestion.
+- Saved time showed −0:00 for sub-second savings; the header now shows m:ss.s.
+- E2E lives in `frontend/e2e/`; Chromium could not be downloaded here, so local runs use `PW_CHANNEL=chrome`.
+
+**Next time**
+- Write the fixture with both tiers first: the first fixture had only sure cuts.

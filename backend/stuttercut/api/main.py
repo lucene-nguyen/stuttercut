@@ -1,7 +1,9 @@
 """API server (process 1). Run: uvicorn stuttercut.api.main:app --host 127.0.0.1
+(or scripts/start.sh / scripts/start.ps1).
 
-The app starts the worker process (process 2) and stops it on shutdown. Tests build their own
-app with ``create_app(cfg, worker=...)``.
+The app starts the worker process (process 2) and stops it on shutdown, and serves the built UI
+(frontend/dist, or STUTTERCUT_UI_DIR) at / when it exists. Tests build their own app with
+``create_app(cfg, worker=...)``.
 """
 
 import subprocess
@@ -12,6 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from stuttercut.api.routes import health, jobs, observability
 from stuttercut.api.worker_proc import WorkerHandle, fail_running, pending_messages
@@ -20,6 +23,8 @@ from stuttercut.observability.logging import setup_logging
 from stuttercut.storage import paths
 from stuttercut.storage.db import connect
 from stuttercut.worker.main import Message
+
+UI_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"  # repo checkout
 
 
 class Worker(Protocol):
@@ -79,6 +84,9 @@ def create_app(
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(observability.router)
+    ui = cfg.ui_dir or UI_DIST
+    if (ui / "index.html").is_file():  # the built UI (npm run build) on the same port as the API
+        app.mount("/", StaticFiles(directory=ui, html=True), name="ui")
     return app
 
 

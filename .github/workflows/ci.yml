@@ -42,6 +42,34 @@ jobs:
         run: pytest -rs --cov=stuttercut.rules --cov-fail-under=80 --cov-report=term
         env:
           STUTTERCUT_REQUIRE_FFMPEG: "1" # media tests must run here, not skip
+      - name: CLI smoke run (fake transcriber, macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tmp="$(mktemp -d)"
+          ffmpeg -nostdin -loglevel error -f lavfi -i testsrc=size=320x240:rate=25:duration=10             -f lavfi -i sine=frequency=330:duration=10 -c:v libx264 -pix_fmt yuv420p -c:a aac             -shortest "$tmp/bài thử.mp4"
+          export STUTTERCUT_HOME="$tmp/home" STUTTERCUT_OUTPUT_DIR="$tmp/out"
+          export STUTTERCUT_FAKE_TRANSCRIBER="$PWD/tests/fixtures/review_clip.json"
+          python -m stuttercut.worker.cli "$tmp/bài thử.mp4"
+          python -m stuttercut.worker.cli render latest --approve all --format both
+          ls -l "$tmp/out"
+          test -s "$tmp/out/bài thử_clean.mp4" && test -s "$tmp/out/bài thử_clean.xml"
+      - uses: actions/setup-node@v4
+        if: runner.os == 'macOS'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Start script smoke run (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python -m venv .venv && .venv/bin/pip install -q -e "backend[dev]"
+          export STUTTERCUT_NO_BROWSER=1 STUTTERCUT_PORT=8799 STUTTERCUT_HOME="$(mktemp -d)"
+          ./scripts/start.sh > start.log 2>&1 &
+          for i in $(seq 1 180); do curl -fs http://127.0.0.1:8799/api/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:8799/ | grep -q "<title>StutterCut</title>"
+          curl -fs http://127.0.0.1:8799/api/health | grep -q '"alive":true' || { sleep 3; curl -fs http://127.0.0.1:8799/api/health; }
+          kill %1 || true
+          tail -5 start.log
 
   e2e:
     runs-on: ubuntu-latest

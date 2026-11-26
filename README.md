@@ -29,10 +29,22 @@ cd frontend && npm install
 
 ## Run
 
+One command (builds the UI if needed, starts the API + worker, opens http://127.0.0.1:8000):
+
+```bash
+./scripts/start.sh                                            # macOS / Linux
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1   # Windows
+```
+
+For UI work, two terminals with live reload:
+
 ```bash
 uvicorn stuttercut.api.main:app             # API on http://127.0.0.1:8000, starts the worker process
 cd frontend && npm run dev                   # UI on http://127.0.0.1:5173 (proxies /api)
 ```
+
+Setup from scratch: [docs/guides/setup-mac.md](docs/guides/setup-mac.md),
+[docs/guides/setup-windows.md](docs/guides/setup-windows.md).
 
 Open http://127.0.0.1:5173, drop a video (≤ 3 min), review the suggested cuts, render.
 Review keys: Space play, ←/→ previous/next cut, K keep, X cut, Enter render.

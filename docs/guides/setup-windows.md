@@ -3,6 +3,12 @@
 The development environment: Windows 11, optional NVIDIA GPU. Commands are for PowerShell
 unless marked otherwise. Everything also works on CPU only; it is just slower.
 
+> **Verified 2026-11-26** on Windows 11 (Python 3.11.9, Node 22.20, FFmpeg 8.1): a fresh
+> clone in a folder with a space and Vietnamese letters, steps 1–2 and 4, then
+> `scripts\start.ps1` (npm ci + UI build + API in 20 s; `pip install -e "backend[dev]"` took
+> 3 min) and upload → Approve all sure → render MP4 + XML with the fake transcriber. The real
+> model on this machine: c001 in LEARNING-206 to 210.
+
 ## 1. Tools
 
 ```powershell
@@ -20,17 +26,27 @@ ffmpeg -version             # first line shows the version; ffprobe comes with i
 
 ## 2. Repository and Python environment
 
+Clone into a folder whose **path has only ASCII letters** (e.g. `C:\work-space\stuttercut`).
+Python 3.11 reads the editable install's `.pth` file in the Windows code page, so a path with
+Vietnamese letters makes `stuttercut` unimportable for pytest and the CLI
+([lesson 005](../lessons/005-python-311-pth-files-are-not-utf8-on-windows.md)). The start
+script works around it, the tools do not. Video files and the data folder may use any name.
+
 ```powershell
 git clone https://github.com/lucene-nguyen/stuttercut.git
 cd stuttercut
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 # If activation is blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-pip install -e "backend[dev]"            # app + quality tools
-pip install -e "backend[dev,eval]"       # + ASR spike models (torch, transformers, ...)
+pip install -e "backend[dev]"            # app + quality tools (enough with the fake transcriber)
+pip install -e "backend[dev,asr]"        # + the real transcriber: CrisperWhisper, torch, silero-vad
+pip install -e "backend[dev,eval]"       # only for the ASR spike scripts (eval/)
 pre-commit install
 Copy-Item .env.example .env
 ```
+
+The first real job downloads CrisperWhisper large (about 3 GB) into the Hugging Face cache
+(`%USERPROFILE%\.cache\huggingface`); later jobs load it from there.
 
 Edit `.env` (forward slashes avoid escaping problems):
 
@@ -67,7 +83,25 @@ The `torch` wheel that pip installs by default on Windows is **CPU-only**. To us
 cd frontend; npm install; cd ..
 ```
 
-## 5. Check
+## 5. Run the app
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start.ps1
+```
+
+One command: it installs the UI packages if needed, builds the UI when its sources changed,
+starts the API (which starts the worker process and serves the UI) and opens
+<http://127.0.0.1:8000>. Ctrl+C stops everything. `STUTTERCUT_PORT` picks another port,
+`STUTTERCUT_NO_BROWSER=1` skips the browser.
+
+For UI work use two terminals instead: `uvicorn stuttercut.api.main:app` and
+`cd frontend; npm run dev` (http://127.0.0.1:5173, reloads on save).
+
+Without the `asr` extra (or to try the app without the model), set
+`STUTTERCUT_FAKE_TRANSCRIBER=tests/fixtures/review_clip.json` in `.env`: every video then gets
+the same short synthetic transcript.
+
+## 6. Check
 
 ```powershell
 python -c "import torch; print(torch.__version__, 'cuda', torch.cuda.is_available())"
@@ -136,4 +170,11 @@ On macOS there is nothing to do: faster-whisper runs on CPU there.
   (Git Bash; rerun the `curl` line if it stops, it continues where it left off.) See
   [lesson 001](../lessons/001-torch-cuda13-vs-ctranslate2-cuda12.md).
 - `Activate.ps1 cannot be loaded`: run the `Set-ExecutionPolicy` line from step 2 once.
-- Paths with spaces or Vietnamese characters are fine; quote them in PowerShell.
+- Video and data paths with spaces or Vietnamese characters are fine; quote them in PowerShell.
+  The repository path should be ASCII (step 2).
+- `No module named 'stuttercut'` right after `pip install -e`: the checkout path has non-ASCII
+  letters (step 2). Move the folder, or prefix commands with `$env:PYTHONPATH="$PWDackend";`.
+- `[Errno 10048] ... address already in use` from the start script: another app holds port
+  8000; `$env:STUTTERCUT_PORT=8010` then start again.
+- `ffmpeg is not installed`: open a new terminal after `winget install Gyan.FFmpeg` (PATH is
+  read when the terminal starts).

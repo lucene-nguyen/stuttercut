@@ -91,6 +91,7 @@ cp .env.example .env                                 # fill in LLM_API_KEY
 cd frontend && npm install
 
 # run (from the repo root, venv active)
+./scripts/start.sh                                   # one command: UI build + API + worker on :8000 (Windows: scripts\start.ps1)
 uvicorn stuttercut.api.main:app                      # API on 127.0.0.1:8000; starts the worker process
 pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
 python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word + cut counts, peak RAM (no text)

@@ -6,5 +6,6 @@
 - [ ] Fault-injection suite green
 - [ ] E2E (real model) green on Mac; axe scan has no serious issues
 - [ ] Listening checklist passed on 3 rendered clips
+- [ ] [Acceptance test v1](acceptance-v1.md) passed on Windows and on the Mac, results in `docs/acceptance/`
 - [ ] CHANGELOG.md updated; version bumped (SemVer); tag pushed
 - [ ] Jira tasks for this release closed

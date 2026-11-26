@@ -63,7 +63,16 @@ def post_log(body: UiError) -> None:
 
 @router.get("/diagnostics/environment")
 def get_environment(request: Request) -> dict[str, Any]:
-    return diagnostics.environment(request.app.state.cfg)
+    cfg = request.app.state.cfg
+    return {**diagnostics.environment(cfg), "log_dir": str(paths.log_dir(cfg))}
+
+
+@router.post("/logs/open-folder", status_code=204)
+def open_log_folder(request: Request) -> None:
+    """ "Open log folder" on the Diagnostics screen: Finder / Explorer at the log folder."""
+    folder = paths.log_dir(request.app.state.cfg)
+    folder.mkdir(parents=True, exist_ok=True)
+    request.app.state.open_folder(folder)
 
 
 @router.post("/diagnostics/export")

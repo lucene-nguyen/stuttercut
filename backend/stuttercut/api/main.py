@@ -38,10 +38,20 @@ def reveal_in_file_manager(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path.parent)])
 
 
+def open_in_file_manager(folder: Path) -> None:
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(folder)])
+    elif sys.platform == "win32":
+        subprocess.Popen(["explorer", str(folder)])
+    else:
+        subprocess.Popen(["xdg-open", str(folder)])
+
+
 def create_app(
     cfg: Config | None = None,
     worker: Worker | None = None,
     reveal: Callable[[Path], None] = reveal_in_file_manager,
+    open_folder: Callable[[Path], None] = open_in_file_manager,
 ) -> FastAPI:
     cfg = cfg or load_config()
 
@@ -57,6 +67,7 @@ def create_app(
     app.state.cfg = cfg
     app.state.worker = worker or WorkerHandle(cfg)
     app.state.reveal = reveal
+    app.state.open_folder = open_folder
     app.state.sse_interval_s = 0.5
     app.include_router(health.router)
     app.include_router(jobs.router)

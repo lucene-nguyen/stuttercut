@@ -80,3 +80,21 @@ def extract_audio(video: Path, wav: Path, cfg: MediaConfig) -> float:
         ]
     )
     return info.duration_s
+
+
+def make_preview(video: Path, out: Path, cfg: MediaConfig) -> None:
+    """480p H.264 proxy for the review screen (small, seeks fast, plays in every browser)."""
+    tmp = out.with_name(f".{out.name}.part.mp4")
+    try:
+        _run(
+            [
+                *("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"),
+                *("-threads", str(cfg.ffmpeg_threads), "-i", str(video)),
+                *("-vf", f"scale=-2:'min({cfg.preview_height},ih)'", "-c:v", "libx264"),
+                *("-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p"),
+                *("-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "-f", "mp4", str(tmp)),
+            ]
+        )
+        tmp.replace(out)
+    finally:
+        tmp.unlink(missing_ok=True)

@@ -54,3 +54,7 @@ outputs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Playwright output
+frontend/test-results/
+frontend/playwright-report/

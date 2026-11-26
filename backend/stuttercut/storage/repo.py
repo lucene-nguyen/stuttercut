@@ -14,11 +14,33 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def create_job(conn: sqlite3.Connection, source_path: str) -> str:
-    job_id = uuid.uuid4().hex[:12]
+def create_job(
+    conn: sqlite3.Connection,
+    source_path: str,
+    options: str | None = None,
+    job_id: str | None = None,
+) -> str:
+    """``options``: detection options from the upload form, as JSON (None = defaults)."""
+    job_id = job_id or uuid.uuid4().hex[:12]
     with conn:
-        conn.execute("INSERT INTO job (id, source_path) VALUES (?, ?)", (job_id, source_path))
+        conn.execute(
+            "INSERT INTO job (id, source_path, options) VALUES (?, ?, ?)",
+            (job_id, source_path, options),
+        )
     return job_id
+
+
+def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    return list(conn.execute("SELECT * FROM job ORDER BY created_at DESC LIMIT ?", (limit,)))
+
+
+def set_step(conn: sqlite3.Connection, job_id: str, step: str | None) -> None:
+    """The step running now (None when it ends), for progress in the UI."""
+    with conn:
+        conn.execute(
+            "UPDATE job SET step = ?, step_started_at = ? WHERE id = ?",
+            (step, now_iso() if step else None, job_id),
+        )
 
 
 def get_job(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
@@ -107,16 +129,18 @@ def get_spans(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
 def replace_cuts(
     conn: sqlite3.Connection, job_id: str, cuts: list[Cut], sure_min: float = 0.7
 ) -> int:
-    """Replace the job's detected cuts; cuts the user kept (kept=1) are never touched.
+    """Replace the job's detected cuts; cuts the user decided on are never touched.
 
-    A new cut that overlaps a kept one by more than half of itself is skipped, so a re-run
-    does not suggest again what the user already restored. Returns how many were stored.
+    Kept, approved and hand-marked (source user) cuts stay. A new cut that overlaps one of
+    them by more than half of itself is skipped, so a re-run does not suggest again what the
+    user already decided. Returns how many were stored.
     """
     with conn:
-        conn.execute("DELETE FROM cut WHERE job_id = ? AND kept = 0", (job_id,))
-        kept = conn.execute(
-            "SELECT start_s, end_s FROM cut WHERE job_id = ? AND kept = 1", (job_id,)
-        ).fetchall()
+        conn.execute(
+            "DELETE FROM cut WHERE job_id = ? AND kept = 0 AND approved = 0 AND source != 'user'",
+            (job_id,),
+        )
+        kept = conn.execute("SELECT start_s, end_s FROM cut WHERE job_id = ?", (job_id,)).fetchall()
         fresh = [
             c
             for c in cuts
@@ -181,6 +205,33 @@ def get_cuts(conn: sqlite3.Connection, job_id: str) -> list[sqlite3.Row]:
 def set_cut_kept(conn: sqlite3.Connection, cut_id: int, kept: bool) -> None:
     with conn:
         conn.execute("UPDATE cut SET kept = ? WHERE id = ?", (int(kept), cut_id))
+
+
+def decide(conn: sqlite3.Connection, job_id: str, cut_ids: list[int], keep: bool) -> int:
+    """The user's decision: keep (not cut) or cut (approved for render), with a timestamp."""
+    if not cut_ids:
+        return 0
+    marks = ",".join("?" * len(cut_ids))
+    with conn:
+        cur = conn.execute(
+            "UPDATE cut SET kept = ?, approved = ?, decided_at = ?"
+            f" WHERE job_id = ? AND id IN ({marks})",
+            (int(keep), int(not keep), now_iso(), job_id, *cut_ids),
+        )
+    return cur.rowcount
+
+
+def add_user_cut(
+    conn: sqlite3.Connection, job_id: str, start: float, end: float, reason: str
+) -> int:
+    """A cut the detector missed, marked by hand: approved at once (source user)."""
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence, tier, approved,"
+            " decided_at) VALUES (?, ?, ?, ?, 'user', 1.0, 'sure', 1, ?)",
+            (job_id, start, end, reason, now_iso()),
+        )
+    return int(cur.lastrowid or 0)
 
 
 def cut_counts(conn: sqlite3.Connection, job_id: str, by: str) -> dict[str, int]:

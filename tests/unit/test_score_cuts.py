@@ -72,3 +72,25 @@ def test_load_clips_reads_newest_ready_job_and_reports_skips(tmp_path: Path) -> 
 
     assert clips == {"c001": ([pred(0.1, 0.3, "filler")], [label(0.1, 0.3, "filler")])}
     assert skipped == {"c002": "no labels", "c003": "media file not found"}
+
+
+def test_load_clips_finds_an_app_upload_by_name_and_ignores_hand_marked_cuts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "data"
+    (root / "clips").mkdir(parents=True)
+    (root / "clips" / "c001.mp4").write_bytes(b"x")
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "c001.cuts.json").write_text(json.dumps({"clip_id": "c001", "cuts": []}), "utf-8")
+    conn = connect(tmp_path / "s.db")
+    job = repo.create_job(conn, str(tmp_path / "uploads" / "x" / "c001.mp4"))  # the app's copy
+    repo.replace_cuts(conn, job, [Cut(0.1, 0.3, "filler", "rules", 0.9)])
+    cut_id = repo.get_cuts(conn, job)[0]["id"]
+    repo.decide(conn, job, [cut_id], keep=True)  # rejected by the user: still a prediction
+    repo.add_user_cut(conn, job, 1.0, 1.2, "repeat")  # the user's own: not a prediction
+    repo.set_status(conn, job, "done")
+
+    clips, _ = load_clips(conn, root, labels, ["c001"])
+
+    assert clips["c001"][0] == [pred(0.1, 0.3, "filler")]

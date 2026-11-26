@@ -1,3 +1,5 @@
+import sys
+
 from fastapi import APIRouter
 
 router = APIRouter()
@@ -5,4 +7,5 @@ router = APIRouter()
 
 @router.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    """``platform`` lets the UI say Finder (macOS) or Explorer (Windows)."""
+    return {"status": "ok", "platform": sys.platform}

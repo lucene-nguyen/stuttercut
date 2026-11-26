@@ -81,7 +81,12 @@ def test_run_job_happy_path(
     assert job["duration_s"] == pytest.approx(2.0, abs=0.1) and job["peak_rss_mb"] > 0
     assert repo.word_counts(conn, job_id) == {"verbatim": 8, "intended": 0}  # verbatim only
     assert repo.get_words(conn, job_id, "verbatim")[0].text == "ờ"
-    assert spans(conn, job_id) == [("extract_audio", "ok"), ("transcribe", "ok"), ("detect", "ok")]
+    assert spans(conn, job_id) == [
+        ("extract_audio", "ok"), ("preview", "ok"), ("transcribe", "ok"), ("detect", "ok"),
+    ]  # fmt: skip
+    preview = paths.job_dir(cfg, job_id) / "preview.mp4"
+    assert preview.stat().st_size > 0
+    assert repo.get_job(conn, job_id)["step"] is None  # cleared when the last step ended
     # fixture: "ờ" filler + "tôi tôi" repeat, found from words alone (no VAD)
     assert repo.cut_counts(conn, job_id, "reason") == {"filler": 1, "repeat": 1}
     assert fake.calls == [paths.job_dir(cfg, job_id) / "audio.wav"]
@@ -112,7 +117,11 @@ def test_run_job_transcribe_failure(
     assert job is not None
     assert (job["status"], job["failed_step"]) == ("failed", "transcribe")
     assert job["error"] == "RuntimeError: CUDA out of memory"
-    assert spans(conn, job_id) == [("extract_audio", "ok"), ("transcribe", "error")]
+    assert spans(conn, job_id) == [
+        ("extract_audio", "ok"),
+        ("preview", "ok"),
+        ("transcribe", "error"),
+    ]
     assert repo.word_counts(conn, job_id) == {"verbatim": 0, "intended": 0}
 
 

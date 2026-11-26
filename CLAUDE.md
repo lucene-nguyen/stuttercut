@@ -91,7 +91,7 @@ cp .env.example .env                                 # fill in LLM_API_KEY
 cd frontend && npm install
 
 # run (from the repo root, venv active)
-uvicorn stuttercut.api.main:app --reload             # API on 127.0.0.1:8000 (worker comes later)
+uvicorn stuttercut.api.main:app                      # API on 127.0.0.1:8000; starts the worker process
 pip install -e "backend[dev,asr]"                    # real transcriber (CrisperWhisper + torch); CUDA: docs/guides/setup-windows.md
 python -m stuttercut.worker.cli "<video>"            # one job in-process: timings, word + cut counts, peak RAM (no text)
 python -m stuttercut.worker.cli render latest --approve sure --format both
@@ -115,11 +115,13 @@ python -m eval.run_spike                             # needs STUTTERCUT_DATA_DIR
 python -m eval.score_spike eval/reports/<date>
 python -m eval.score_cuts                            # detector P/R/F1 vs eval/labels (needs a CLI run per clip)
 python -m eval.llm_bench --provider ollama           # LLM verdict accuracy on synthetic sentences (3 runs)
+python -m eval.export_reviews                        # review decisions in the app -> eval/labels/<clip>.cuts.json
 cd frontend && npm run lint && npm test              # tsc + eslint + prettier, then vitest
 cd frontend && npm run build
 ```
 
-Playwright e2e is not set up yet; add its command here when it lands.
+cd frontend && npm run e2e                           # Playwright E2E + axe: API (fake transcriber) + Vite on 8765/5174
+                                                     # first time: npx playwright install chromium (or PW_CHANNEL=chrome)
 
 Update this section when commands change.
 

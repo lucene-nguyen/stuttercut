@@ -1,12 +1,16 @@
 """Worker process entrypoint (ADR 0003): load the transcriber once, then run one job at a time.
 
-Started by the API server (LEARNING-235) as ``multiprocessing.Process(target=worker_main,
-args=(job_queue,))``; it reads job ids from the queue until it gets ``None``.
+Started by the API server as ``multiprocessing.Process(target=worker_main, args=(job_queue,
+cfg))``. It reads messages from the queue until it gets ``None``:
+``job_id`` or ``("process", job_id)`` runs the pipeline; ``("render", job_id, format, folder)``
+renders; ``("retry", job_id)`` re-runs from the failed step. One message at a time.
 """
 
 import logging
+import sqlite3
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 from stuttercut.asr import Transcriber
@@ -17,17 +21,27 @@ from stuttercut.observability.logging import setup_logging
 from stuttercut.platform import preflight_model_size, select_device
 from stuttercut.storage import paths, repo
 from stuttercut.storage.db import connect
-from stuttercut.worker.pipeline import run_job
+from stuttercut.worker.pipeline import run_job, run_render, run_retry
 
 log = logging.getLogger(__name__)
 
 
+Message = str | tuple[str, ...]
+
+
 class JobQueue(Protocol):
-    def get(self) -> str | None: ...
+    def get(self) -> Message | None: ...
 
 
 def load_transcriber(cfg: Config) -> Transcriber:
-    """Pick the device, check free RAM for the model size, load CrisperWhisper."""
+    """Pick the device, check free RAM for the model size, load CrisperWhisper.
+
+    STUTTERCUT_FAKE_TRANSCRIBER (tests, E2E) loads a fixture transcript instead.
+    """
+    if cfg.asr.fake_fixture is not None:
+        from stuttercut.asr.fake import FakeTranscriber
+
+        return FakeTranscriber(cfg.asr.fake_fixture, cfg.asr.passes)
     from stuttercut.asr.crisperwhisper import CrisperWhisperTranscriber
 
     device = select_device(cfg.asr.device)
@@ -38,6 +52,8 @@ def load_transcriber(cfg: Config) -> Transcriber:
 
 def load_vad(cfg: Config) -> VoiceDetector | None:
     """silero-vad if installed; otherwise detection runs on words only (WARN logged)."""
+    if cfg.asr.fake_fixture is not None:
+        return None  # fake transcript: VAD on its synthetic audio would invent cuts
     try:
         from stuttercut.media.vad import SileroVad
 
@@ -83,6 +99,31 @@ def lower_priority(nice: int) -> None:
         log.warning("could not lower worker priority", exc_info=True)
 
 
+def handle(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    msg: Message,
+    transcriber: Transcriber | None,
+    vad: VoiceDetector | None = None,
+    llm: LLMClient | None = None,
+    load_error: str = "",
+) -> None:
+    """Run one queue message. Errors are logged, never raised: the worker keeps serving."""
+    kind, job_id, *args = ("process", msg) if isinstance(msg, str) else msg
+    try:
+        if kind == "render":
+            fmt, folder = [*args, "mp4", ""][:2]
+            run_render(conn, cfg, job_id, fmt, Path(folder) if folder else None)
+        elif transcriber is None:
+            repo.set_status(conn, job_id, "failed", failed_step="load_model", error=load_error)
+        elif kind == "retry":
+            run_retry(conn, cfg, job_id, transcriber, vad, llm)
+        else:
+            run_job(conn, cfg, job_id, transcriber, vad, llm)
+    except Exception:
+        log.error("worker message failed", exc_info=True, extra={"job_id": job_id, "kind": kind})
+
+
 def worker_main(
     job_queue: JobQueue,
     cfg: Config | None = None,
@@ -103,10 +144,7 @@ def worker_main(
         log.error("ASR model failed to load", exc_info=True)
         transcriber, load_error, vad, llm = None, f"{type(e).__name__}: {e}", None, None
     try:
-        while (job_id := job_queue.get()) is not None:
-            if transcriber is None:
-                repo.set_status(conn, job_id, "failed", failed_step="load_model", error=load_error)
-                continue
-            run_job(conn, cfg, job_id, transcriber, vad, llm)
+        while (msg := job_queue.get()) is not None:
+            handle(conn, cfg, msg, transcriber, vad, llm, load_error)
     finally:
         conn.close()

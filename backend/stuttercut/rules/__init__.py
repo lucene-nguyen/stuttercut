@@ -8,7 +8,7 @@ import unicodedata
 from dataclasses import dataclass
 
 REASONS = ("filler", "repeat", "pause", "retake")
-SOURCES = ("rules", "vad", "diff", "llm")
+SOURCES = ("rules", "vad", "diff", "llm", "user")  # user = marked by hand in review
 
 Interval = tuple[float, float]  # (start, end) in seconds
 

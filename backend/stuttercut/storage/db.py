@@ -75,6 +75,39 @@ MIGRATIONS: list[str] = [
     ALTER TABLE cut ADD COLUMN approved INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1));
     ALTER TABLE job ADD COLUMN xml_path TEXT;
     """,
+    # 5: review UI (LEARNING-209). SQLite cannot change a CHECK, so cut is rebuilt to allow
+    # source 'user' (a cut marked by hand) and to record when the user decided (decided_at).
+    # job.options = detection options from the upload form (JSON); step/step_started_at = the
+    # step running now, for progress.
+    """
+    CREATE TABLE cut_new (
+        id               INTEGER PRIMARY KEY,
+        job_id           TEXT NOT NULL REFERENCES job(id) ON DELETE CASCADE,
+        start_s          REAL NOT NULL,
+        end_s            REAL NOT NULL CHECK (end_s > start_s),
+        reason           TEXT NOT NULL CHECK (reason IN ('filler', 'repeat', 'pause', 'retake')),
+        source           TEXT NOT NULL CHECK (source IN ('rules', 'vad', 'diff', 'llm', 'user')),
+        confidence       REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+        kept             INTEGER NOT NULL DEFAULT 0 CHECK (kept IN (0, 1)),
+        tier             TEXT NOT NULL DEFAULT 'unsure' CHECK (tier IN ('sure', 'unsure')),
+        rule_confidence  REAL,
+        llm_verdict      TEXT CHECK (llm_verdict IN ('cut', 'keep')),
+        llm_confidence   REAL,
+        llm_reason       TEXT,
+        approved         INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0, 1)),
+        decided_at       TEXT
+    );
+    INSERT INTO cut_new (id, job_id, start_s, end_s, reason, source, confidence, kept, tier,
+                         rule_confidence, llm_verdict, llm_confidence, llm_reason, approved)
+        SELECT id, job_id, start_s, end_s, reason, source, confidence, kept, tier,
+               rule_confidence, llm_verdict, llm_confidence, llm_reason, approved FROM cut;
+    DROP TABLE cut;
+    ALTER TABLE cut_new RENAME TO cut;
+    CREATE INDEX cut_job ON cut(job_id);
+    ALTER TABLE job ADD COLUMN options TEXT;
+    ALTER TABLE job ADD COLUMN step TEXT;
+    ALTER TABLE job ADD COLUMN step_started_at TEXT;
+    """,
 ]
 
 

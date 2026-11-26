@@ -39,6 +39,8 @@ class AsrConfig:
     min_free_gb_large: float = 6.0
     min_free_gb_any: float = 3.0
     threads: int = 0  # torch CPU threads; 0 = library default
+    # Tests and E2E only: a transcript fixture (tests/fixtures/*.json) replaces the real model.
+    fake_fixture: Path | None = None
 
     def __post_init__(self) -> None:
         if self.passes not in PASSES:
@@ -52,8 +54,10 @@ class AsrConfig:
 @dataclass(frozen=True)
 class MediaConfig:
     max_duration_s: float = 180.0
+    max_upload_mb: int = 1024
     sample_rate: int = 16000
     ffmpeg_threads: int = 2
+    preview_height: int = 480
 
 
 def csv(raw: str) -> tuple[str, ...]:
@@ -193,7 +197,10 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_ASR_MIN_FREE_GB_LARGE": ("asr", "min_free_gb_large", float),
     "STUTTERCUT_ASR_MIN_FREE_GB_ANY": ("asr", "min_free_gb_any", float),
     "STUTTERCUT_ASR_THREADS": ("asr", "threads", int),
+    "STUTTERCUT_FAKE_TRANSCRIBER": ("asr", "fake_fixture", Path),
     "STUTTERCUT_MAX_DURATION_S": ("media", "max_duration_s", float),
+    "STUTTERCUT_MAX_UPLOAD_MB": ("media", "max_upload_mb", int),
+    "STUTTERCUT_PREVIEW_HEIGHT": ("media", "preview_height", int),
     "STUTTERCUT_FFMPEG_THREADS": ("media", "ffmpeg_threads", int),
     "STUTTERCUT_LOG_LEVEL": ("log", "level", str),
     "STUTTERCUT_LOG_MAX_BYTES": ("log", "max_bytes", int),

@@ -1,4 +1,8 @@
-"""The steps for one job: extract_audio -> transcribe -> detect [-> llm_review] (ADR 0002/0003).
+"""The steps for one job: extract_audio -> preview -> transcribe -> detect [-> llm_review]
+(ADR 0002/0003). ``preview`` is the 480p proxy the review screen plays.
+
+Detection options from the upload form (job.options JSON: filler/repeat/pause/retake on or off,
+pause_min_ms) drop the reasons switched off; retake off also skips the LLM review.
 
 llm_review runs only when an LLM client is given (STUTTERCUT_LLM_ENABLED=true). With the local
 provider (ollama) and free RAM below STUTTERCUT_LLM_UNLOAD_ASR_BELOW_GB, the ASR model is
@@ -16,16 +20,17 @@ records a span; any error is logged with the job id. Words and detected cuts are
 a re-run (cuts the user kept are never touched), so retries are safe.
 """
 
+import json
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from stuttercut.asr import Transcriber, Unloadable
 from stuttercut.config import RENDER_FORMATS, Config, LlmConfig
 from stuttercut.llm import LLMClient
 from stuttercut.llm.review import review
-from stuttercut.media.audio import MediaError, extract_audio
+from stuttercut.media.audio import MediaError, extract_audio, make_preview
 from stuttercut.media.fcpxml import write_xml
 from stuttercut.media.render import RenderError, plan, removed_s, render_mp4, video_info
 from stuttercut.media.vad import VoiceDetector
@@ -38,7 +43,13 @@ from stuttercut.storage import paths, repo
 
 log = logging.getLogger(__name__)
 
-STEPS = ("extract_audio", "transcribe", "detect")
+STEPS = ("extract_audio", "preview", "transcribe", "detect")
+
+
+def job_options(job: sqlite3.Row) -> dict[str, object]:
+    """Detection (and last render) options stored with the job; {} = defaults."""
+    raw = job["options"]
+    return dict(json.loads(raw)) if raw else {}
 
 
 def _fail(conn: sqlite3.Connection, job_id: str, step: str, e: Exception) -> str:
@@ -54,6 +65,11 @@ def _fail(conn: sqlite3.Connection, job_id: str, step: str, e: Exception) -> str
 
 def _detect(conn: sqlite3.Connection, cfg: Config, job_id: str, vad: VoiceDetector | None) -> None:
     """Words from the DB + VAD on the job's audio -> rules -> CUT rows."""
+    job = repo.get_job(conn, job_id)
+    opts = job_options(job) if job is not None else {}
+    rules = cfg.rules
+    if isinstance(opts.get("pause_min_ms"), int):
+        rules = replace(rules, pause_min_ms=int(str(opts["pause_min_ms"])))
     verbatim = repo.get_words(conn, job_id, "verbatim")
     intended = repo.get_words(conn, job_id, "intended") or None
     voiced: list[Interval] | None = None
@@ -63,7 +79,8 @@ def _detect(conn: sqlite3.Connection, cfg: Config, job_id: str, vad: VoiceDetect
         except Exception:  # VAD is a backup source: degrade to word rules, do not fail
             log.warning("VAD failed; detecting from words only", exc_info=True,
                         extra={"job_id": job_id})  # fmt: skip
-    cuts = detect(verbatim, cfg.rules, intended=intended, voiced=voiced)
+    cuts = [c for c in detect(verbatim, rules, intended=intended, voiced=voiced)
+            if opts.get(c.reason, True)]  # fmt: skip
     stored = repo.replace_cuts(conn, job_id, cuts, cfg.rules.tier_sure_min)
     log.info(
         "cuts detected",
@@ -168,6 +185,9 @@ def run_job(
             with span(conn, job_id, step):
                 duration = extract_audio(Path(job["source_path"]), wav, cfg.media)
                 repo.update_job(conn, job_id, duration_s=round(duration, 3))
+            step = "preview"
+            with span(conn, job_id, step):
+                make_preview(Path(job["source_path"]), wav.with_name("preview.mp4"), cfg.media)
             if isinstance(transcriber, Unloadable) and not transcriber.loaded:
                 step = "load_model"  # freed for the local LLM after the previous job
                 with span(conn, job_id, step):
@@ -186,7 +206,7 @@ def run_job(
             return _fail(conn, job_id, step, e)
         finally:
             repo.update_job(conn, job_id, peak_rss_mb=rss.peak_mb)
-        if llm is not None:
+        if llm is not None and job_options(job).get("retake", True):
             try:
                 _free_asr_for_local_llm(conn, cfg, job_id, transcriber)
             except Exception:  # an unload problem must not block the review
@@ -217,7 +237,7 @@ def run_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMC
     return "ready_for_review"
 
 
-RENDERABLE = ("ready_for_review", "done")
+RENDERABLE = ("ready_for_review", "done", "rendering")  # rendering: set by the API on request
 
 
 @dataclass(frozen=True)
@@ -232,9 +252,14 @@ class RenderResult:
 
 
 def run_render(
-    conn: sqlite3.Connection, cfg: Config, job_id: str, fmt: str = "mp4"
+    conn: sqlite3.Connection,
+    cfg: Config,
+    job_id: str,
+    fmt: str = "mp4",
+    out_dir: Path | None = None,
 ) -> RenderResult:
-    """Approved, not-kept cuts -> <name>_clean.mp4 and/or .xml in the output folder."""
+    """Approved, not-kept cuts -> <name>_clean.mp4 and/or .xml in ``out_dir`` (default: the
+    output folder from config)."""
     if fmt not in RENDER_FORMATS:
         raise ValueError(f"format must be one of {RENDER_FORMATS}, got {fmt!r}")
     job = repo.get_job(conn, job_id)
@@ -252,7 +277,9 @@ def run_render(
             if not info.has_audio:
                 raise RenderError("probe", f"{source.name} has no audio stream")
             keeps = plan(cuts, info.duration_s, cfg.render, info.fps)
-            out_dir = paths.output_dir(cfg)
+            if out_dir is None:
+                out_dir = paths.output_dir(cfg)
+            out_dir.mkdir(parents=True, exist_ok=True)
             mp4 = xml = None
             encoder = None
             if fmt in ("mp4", "both"):
@@ -273,3 +300,25 @@ def run_render(
                "removed_s": round(removed, 3), "encoder": encoder},
     )  # fmt: skip
     return RenderResult("done", len(cuts), removed, info.duration_s - removed, encoder, mp4, xml)
+
+
+def run_retry(
+    conn: sqlite3.Connection,
+    cfg: Config,
+    job_id: str,
+    transcriber: Transcriber,
+    vad: VoiceDetector | None = None,
+    llm: LLMClient | None = None,
+) -> str:
+    """Re-run from the failed step: render again with the last request, else the job's steps
+    (words and undecided cuts are replaced; decided cuts stay)."""
+    job = repo.get_job(conn, job_id)
+    if job is None:
+        raise KeyError(f"no job {job_id}")
+    if job["failed_step"] == "render":
+        req = job_options(job).get("render")
+        render = req if isinstance(req, dict) else {}
+        folder = render.get("folder")
+        return run_render(conn, cfg, job_id, str(render.get("format", "mp4")),
+                          Path(folder) if folder else None).status  # fmt: skip
+    return run_job(conn, cfg, job_id, transcriber, vad, llm)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from stuttercut.config import LogConfig
 
-LOG_FILE = "app.jsonl"
+LOG_FILE = "app.jsonl"  # the CLI; the API and the worker process write api.jsonl / worker.jsonl
 # Attributes every LogRecord has; anything else on a record came from ``extra``.
 _STANDARD = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime", "taskName"}
 
@@ -29,10 +29,14 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False, default=str)
 
 
-def setup_logging(log_dir: Path, cfg: LogConfig) -> Path:
-    """Attach the rotating JSON Lines handler to the ``stuttercut`` logger (idempotent)."""
+def setup_logging(log_dir: Path, cfg: LogConfig, name: str = "app") -> Path:
+    """Attach the rotating JSON Lines handler to the ``stuttercut`` logger (idempotent).
+
+    One file per process (``<name>.jsonl``): two processes rotating one file fail on Windows,
+    where an open file cannot be renamed.
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
-    path = log_dir / LOG_FILE
+    path = log_dir / f"{name}.jsonl"
     logger = logging.getLogger("stuttercut")
     logger.setLevel(cfg.level)
     for handler in list(logger.handlers):

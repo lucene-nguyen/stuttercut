@@ -13,7 +13,7 @@ from typing import Protocol
 
 from fastapi import FastAPI
 
-from stuttercut.api.routes import health, jobs
+from stuttercut.api.routes import health, jobs, observability
 from stuttercut.api.worker_proc import WorkerHandle
 from stuttercut.config import Config, load_config
 from stuttercut.observability.logging import setup_logging
@@ -47,7 +47,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        setup_logging(paths.log_dir(cfg), cfg.log)
+        setup_logging(paths.log_dir(cfg), cfg.log, "api")
         connect(paths.db_path(cfg)).close()  # migrate before the worker opens the DB
         app.state.worker.start()
         yield
@@ -60,6 +60,7 @@ def create_app(
     app.state.sse_interval_s = 0.5
     app.include_router(health.router)
     app.include_router(jobs.router)
+    app.include_router(observability.router)
     return app
 
 

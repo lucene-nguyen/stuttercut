@@ -42,7 +42,7 @@ class InlineWorker:
 @pytest.fixture
 def api(cfg: Config) -> Iterator[tuple[TestClient, InlineWorker, list[Path]]]:
     worker, revealed = InlineWorker(cfg), []
-    app = create_app(cfg, worker=worker, reveal=revealed.append)
+    app = create_app(cfg, worker=worker, reveal=revealed.append, open_folder=revealed.append)
     app.state.sse_interval_s = 0.01
     with TestClient(app) as client:
         yield client, worker, revealed

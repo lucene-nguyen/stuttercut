@@ -95,3 +95,11 @@ def test_export_has_logs_and_environment_but_no_transcript(
         assert w not in blob
     assert json.loads(z.read("jobs.json"))[0]["id"] == job_id
     assert paths.log_dir(cfg).is_dir()
+
+
+def test_environment_names_the_log_folder_and_open_folder_opens_it(api: Api, cfg: Config) -> None:
+    client, _, opened = api
+    env = client.get("/api/diagnostics/environment").json()
+    assert env["log_dir"] == str(paths.log_dir(cfg)) and env["ram_gb"] > 0
+    assert client.post("/api/logs/open-folder").status_code == 204
+    assert opened == [paths.log_dir(cfg)]

@@ -565,3 +565,91 @@ kbd {
   border: 1px solid var(--line-2);
   color: var(--text-2);
 }
+
+/* diagnostics */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.big {
+  font-size: 28px;
+  font-weight: 600;
+}
+.step-row,
+.wf-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.step-track {
+  height: 10px;
+  border-radius: 5px;
+  background: #1f242d;
+}
+.step-track > span {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+}
+.waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wf-track {
+  position: relative;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+.wf-bar {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 3px;
+}
+.stderr {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #e9c9c4;
+  max-height: 240px;
+  overflow: auto;
+}
+.job-picker {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.job-picker button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.job-picker button[aria-pressed='true'] {
+  background: #1b2230;
+  border-color: var(--accent);
+}
+.job-picker .name {
+  display: block;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

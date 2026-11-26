@@ -1,23 +1,14 @@
 // E2E flows of LEARNING-209 with the fake transcriber (tests/fixtures/review_clip.json):
 // 2 sure cuts (filler "ờ", repeat "tôi") and 2 unsure (a pause, the filler "à").
-import { join } from 'node:path'
-
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
-const media = (name: string) => join(process.env.E2E_TMP!, 'media', name)
+import { upload } from './helpers'
 
 async function uploadAndOpen(page: Page) {
-  await page.goto('/')
-  const rows = page.locator('tbody tr')
-  const before = await rows.count()
-  await page.setInputFiles('input[type=file]', media('bài nói thử.mp4'))
-  await expect(rows).toHaveCount(before + 1)
-  await expect(rows.first()).toContainText('Ready for review', { timeout: 60_000 })
-  await rows
-    .first()
-    .getByRole('link', { name: /Review/ })
-    .click()
+  const { row } = await upload(page, 'bài nói thử.mp4')
+  await expect(row).toContainText('Ready for review', { timeout: 60_000 })
+  await row.getByRole('link', { name: /Review/ }).click()
   await expect(page.locator('.transcript')).toContainText('Xin')
 }
 
@@ -45,15 +36,12 @@ test('upload → review → render MP4 + XML', async ({ page }) => {
 })
 
 test('a 4-minute video is refused with a clear message', async ({ page }) => {
-  await page.goto('/')
-  const rows = page.locator('tbody tr')
-  await expect(page.getByRole('heading', { name: 'Recent jobs' })).toBeVisible()
-  const before = await rows.count()
-  await page.setInputFiles('input[type=file]', media('dài quá.mp4'))
+  const { res, added } = await upload(page, 'dài quá.mp4')
+  expect(res.status()).toBe(422)
+  expect(added).toEqual([]) // no job created
   await expect(page.getByRole('alert')).toHaveText(
     'dài quá.mp4 is 4:00 long. Choose a video of 3 minutes or less.',
   )
-  await expect(rows).toHaveCount(before)
 })
 
 test('decisions and a missed cut survive a reload', async ({ page }) => {

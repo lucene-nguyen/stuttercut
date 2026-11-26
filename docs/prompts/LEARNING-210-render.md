@@ -36,4 +36,17 @@ Run lint, mypy, pytest. Then render c001 twice with --approve sure and --approve
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/6 (merged 2026-11-26, squash `dd8c4cc`).
+
+**Worked well**
+- Pure planning (padding, merge, minimum segment) with hypothesis properties; one FFmpeg filter_complex with join fades.
+- c001: sure 22 cuts −5.00 s, all 48 cuts −24.57 s; video and audio within 1 ms; h264_nvenc, under 7 s per render.
+- FCP7 XML references the original file; same never-overwrite naming as the MP4.
+
+**Had to be corrected or deviated from the prompt**
+- Keep-segments snap outward to the frame grid: otherwise each join drifts A/V by up to a frame (lesson 004).
+- Windows locked the fresh `.part.xml` (WinError 32); rename/delete now retry (lesson 004).
+- `failed_step` is `render`, not the Test Plan's `render_mp4`; a 10 ms fade at joins instead of a crossfade.
+
+**Next time**
+- Listening check and Resolve import are manual; they move to the v1 acceptance test.

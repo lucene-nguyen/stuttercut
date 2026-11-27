@@ -261,15 +261,17 @@ def approve_cuts(conn: sqlite3.Connection, job_id: str, mode: str) -> int:
     return len(approved_cuts(conn, job_id))
 
 
-def approved_cuts(conn: sqlite3.Connection, job_id: str) -> list[tuple[float, float, bool, bool]]:
-    """(start, end, start_edited, end_edited) of the cuts render applies: approved, not kept."""
+def approved_cuts(
+    conn: sqlite3.Connection, job_id: str
+) -> list[tuple[float, float, bool, bool, bool]]:
+    """(start, end, start_edited, end_edited, is_pause) of the cuts render applies."""
     rows = conn.execute(
-        "SELECT start_s, end_s, start_edited, end_edited FROM cut"
+        "SELECT start_s, end_s, start_edited, end_edited, reason FROM cut"
         " WHERE job_id = ? AND approved = 1 AND kept = 0 ORDER BY start_s",
         (job_id,),
     )
-    return [(r["start_s"], r["end_s"], bool(r["start_edited"]), bool(r["end_edited"]))
-            for r in rows]  # fmt: skip
+    return [(r["start_s"], r["end_s"], bool(r["start_edited"]), bool(r["end_edited"]),
+             r["reason"] == "pause") for r in rows]  # fmt: skip
 
 
 def set_cut_edges(

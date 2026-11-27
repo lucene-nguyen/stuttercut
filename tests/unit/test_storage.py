@@ -147,7 +147,7 @@ def test_approve_modes_and_latest_renderable_job(conn: sqlite3.Connection) -> No
     kept = repo.get_cuts(conn, job_id)[2]["id"]
     repo.set_cut_kept(conn, kept, True)  # the user restored it: never rendered as a cut
     assert repo.approve_cuts(conn, job_id, "sure") == 1
-    assert repo.approved_cuts(conn, job_id) == [(0.0, 0.3, False, False)]
+    assert repo.approved_cuts(conn, job_id) == [(0.0, 0.3, False, False, False)]
     assert repo.approve_cuts(conn, job_id, "all") == 2
     assert repo.approve_cuts(conn, job_id, "none") == 0
     with pytest.raises(ValueError, match="approve"):
@@ -194,7 +194,7 @@ def test_edges_are_edited_against_the_original_and_reset_clears_them(
     row = repo.get_cuts(conn, job_id)[0]
     assert (row["start_s"], row["start_edited"], row["end_edited"]) == (0.98, 1, 0)
     assert (row["approved"], row["kept"]) == (1, 0) and row["decided_at"]  # editing approves
-    assert repo.approved_cuts(conn, job_id)[0] == (0.98, 1.5, True, False)
+    assert repo.approved_cuts(conn, job_id)[0] == (0.98, 1.5, True, False, False)
 
     repo.set_cut_edges(conn, job_id, cut_id, 1.0, 1.5)  # "Reset edges"
     row = repo.get_cuts(conn, job_id)[0]

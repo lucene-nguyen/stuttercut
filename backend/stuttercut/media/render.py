@@ -1,11 +1,24 @@
 """Render approved cuts into a clean MP4 (LEARNING-210): pure planning + a thin FFmpeg layer.
 
-Planning (no I/O): every approved cut shrinks by ``cut_padding_ms`` on both sides (not at the
-clip's own start or end, where there is no syllable to protect, and not on an edge the user
-moved by hand: that edge is exactly where they want it), cuts closer than
-``cut_merge_ms`` merge, the rest of the timeline becomes keep-segments, and segments shorter
-than ``min_segment_ms`` are dropped. Boundaries snap outward to the source frame grid, so every
-video segment holds exactly as much time as its audio: no lip-sync drift across many joins.
+Planning (``plan``, pure; render, GET /plan and the saved time all use it), in this order:
+
+1. **Group.** Sorted cuts merge into one group when the gap between them is under
+   ``cut_merge_ms`` (50), or under ``merge_silent_gap_ms`` (150) with no transcript word in the
+   gap. A gap that holds a word is never merged by the silent-gap rule. Merging comes before
+   padding, so touching cuts never leave scraps between them.
+2. **Pad the group's outer edges** (never at the clip's own start or end). An edge the user moved
+   by hand, or the edge of a pause cut (the pause rule already keeps its margin), gets no padding.
+   Otherwise: if the nearest kept word on that side is at least 2 x ``cut_padding_ms`` away, the
+   edge moves *outward* by the padding, into the silence (the cut word goes fully, the neighbour
+   keeps at least the padding); else it moves *inward* (protect the touching neighbour). Inward
+   padding never makes a cut shorter than ``min_cut_ms`` (60): the padding shrinks instead. With
+   no word data at all, padding goes inward. The clip edge counts as the neighbour when words
+   exist but none is on that side.
+3. **Frames.** Each cut edge snaps to the *nearest* frame of the source; a cut that rounds to
+   less than one frame becomes exactly one frame around its middle, so every approved cut removes
+   at least one frame. Snapped cuts that now overlap merge; the keep-segments are the rest, and
+   keep-segments shorter than ``min_segment_ms`` are dropped (cut too). Video and audio are cut at
+   the same frame times, so lip sync does not drift across joins.
 
 FFmpeg: one filter_complex of trim/atrim + concat (frame-accurate re-encode) with a short audio
 fade at every join. The encoder is the first of h264_videotoolbox -> h264_nvenc -> libx264 that
@@ -57,8 +70,11 @@ class VideoInfo:
 
 
 Segment = tuple[float, float]
-# (start, end) or (start, end, start_edited, end_edited): an edited edge gets no padding.
-PlanCut = tuple[float, float] | tuple[float, float, bool, bool]
+# (start, end[, start_edited, end_edited[, pause]]): edited and pause-cut edges get no padding.
+PlanCut = (
+    tuple[float, float] | tuple[float, float, bool, bool] | tuple[float, float, bool, bool, bool]
+)
+Word = tuple[float, float]  # (start, end) of a transcript word
 
 
 def video_info(path: Path) -> VideoInfo:
@@ -89,22 +105,84 @@ def video_info(path: Path) -> VideoInfo:
 # --- planning (pure) ---------------------------------------------------------------------------
 
 
-def plan(
-    cuts: Sequence[PlanCut], duration: float, cfg: RenderConfig, fps: Fraction | None = None
-) -> list[Segment]:
-    """Keep-segments [(start, end)] in source seconds, sorted and disjoint."""
-    pad, merge = cfg.cut_padding_ms / 1000, cfg.cut_merge_ms / 1000
-    shrunk = []
+def _group(
+    cuts: Sequence[PlanCut], duration: float, cfg: RenderConfig, words: Sequence[Word]
+) -> list[list[float]]:
+    """Step 1: [start, end, start_fixed, end_fixed] per group; fixed = no padding (1.0 / 0.0)."""
+    merge, silent = cfg.cut_merge_ms / 1000, cfg.merge_silent_gap_ms / 1000
+    groups: list[list[float]] = []
     for cut in sorted(cuts):
         s, e = max(cut[0], 0.0), min(cut[1], duration)
-        start_edited, end_edited = (cut[2], cut[3]) if len(cut) == 4 else (False, False)
-        s2 = s if s <= 0 or start_edited else s + pad  # nothing to protect before the clip start
-        e2 = e if e >= duration or end_edited else e - pad
-        if e2 > s2:
-            shrunk.append((s2, e2))
+        if e <= s:
+            continue
+        pause = len(cut) == 5 and bool(cut[4])
+        s_fixed = float(pause or (len(cut) >= 4 and bool(cut[2])))
+        e_fixed = float(pause or (len(cut) >= 4 and bool(cut[3])))
+        if groups:
+            g = groups[-1]
+            gap = s - g[1]
+            silent_gap = gap < silent and not any(w0 < s and w1 > g[1] for w0, w1 in words)
+            if gap < merge or silent_gap:
+                if e >= g[1]:
+                    g[1], g[3] = e, e_fixed
+                continue
+        groups.append([s, e, s_fixed, e_fixed])
+    return groups
+
+
+def _pad(
+    g: list[float], duration: float, cfg: RenderConfig, kept: Sequence[Word], have_words: bool
+) -> Segment:
+    """Step 2: move each free outer edge outward into silence, or inward to protect a word."""
+    pad, min_cut = cfg.cut_padding_ms / 1000, cfg.min_cut_ms / 1000
+    s, e, s_fixed, e_fixed = g
+    ds = de = 0.0
+    if s > 0 and not s_fixed:
+        prev_end = max((w1 for w0, w1 in kept if w0 < s), default=0.0)
+        ds = -pad if have_words and s - prev_end >= 2 * pad else pad
+    if e < duration and not e_fixed:
+        next_start = min((w0 for w0, w1 in kept if w1 > e), default=duration)
+        de = pad if have_words and next_start - e >= 2 * pad else -pad
+    short = min_cut - ((e + de) - (s + ds))
+    inward = max(ds, 0.0) + max(-de, 0.0)
+    if short > 0 and inward > 0:  # inward padding never makes the cut shorter than min_cut
+        keep = max(0.0, inward - short) / inward
+        ds = ds * keep if ds > 0 else ds
+        de = de * keep if de < 0 else de
+    return max(0.0, s + ds), min(duration, e + de)
+
+
+def plan(
+    cuts: Sequence[PlanCut],
+    duration: float,
+    cfg: RenderConfig,
+    fps: Fraction | None = None,
+    words: Sequence[Word] = (),
+) -> list[Segment]:
+    """Keep-segments [(start, end)] in source seconds, sorted and disjoint (steps: docstring)."""
+    groups = _group(cuts, duration, cfg, words)
+    kept = [w for w in words if not any(g[0] <= (w[0] + w[1]) / 2 < g[1] for g in groups)]
+    removed = [_pad(g, duration, cfg, kept, bool(words)) for g in groups]
+    if fps:
+        frame = float(1 / fps)
+
+        def snap(t: float) -> float:
+            if t <= 0 or t >= duration:
+                return min(max(t, 0.0), duration)
+            return min(float(math.floor(t * fps + 0.5 + 1e-9) / fps), duration)
+
+        snapped = []
+        for s, e in removed:
+            s2, e2 = snap(s), snap(e)
+            if e2 - s2 < frame - 1e-9:  # under one frame: exactly one frame around the middle
+                s2 = float(math.floor((s + e) / 2 * fps) / fps)
+                e2 = min(s2 + frame, duration)
+                s2 = max(0.0, e2 - frame)
+            snapped.append((s2, e2))
+        removed = snapped
     merged: list[list[float]] = []
-    for s, e in shrunk:
-        if merged and s - merged[-1][1] < merge:
+    for s, e in sorted(removed):
+        if merged and s <= merged[-1][1] + 1e-9:
             merged[-1][1] = max(merged[-1][1], e)
         else:
             merged.append([s, e])
@@ -113,20 +191,7 @@ def plan(
         keeps.append((t, s))
         t = max(t, e)
     keeps.append((t, duration))
-    if fps:  # outward to whole frames: padding is never eaten; segments that now touch merge
-        snapped: list[list[float]] = []
-        for s, e in keeps:
-            s, e = _frame(s, fps, math.floor), min(_frame(e, fps, math.ceil), duration)
-            if snapped and s <= snapped[-1][1]:
-                snapped[-1][1] = max(snapped[-1][1], e)
-            else:
-                snapped.append([s, e])
-        keeps = [(s, e) for s, e in snapped]
     return [(s, e) for s, e in keeps if e - s >= cfg.min_segment_ms / 1000 - 1e-9]
-
-
-def _frame(t: float, fps: Fraction, rounding: Callable[[float], int]) -> float:
-    return float(rounding(t * fps - 1e-6 if rounding is math.ceil else t * fps + 1e-6) / fps)
 
 
 def removed_s(keeps: Sequence[Segment], duration: float) -> float:

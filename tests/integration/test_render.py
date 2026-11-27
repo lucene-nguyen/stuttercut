@@ -202,7 +202,7 @@ def test_render_after_an_edge_edit_has_the_planned_duration(
     job = repo.get_job(conn, job_id)
     assert job is not None
     keeps, duration = job_plan(conn, cfg, job)
-    # no padding on edited edges; keep-segments still snap outward to whole frames (A/V sync)
+    # no padding on edited edges; each edge goes to the nearest 25 fps frame (0.90 -> 0.92)
     assert keeps[0][1] == pytest.approx(0.92) and keeps[1][0] == pytest.approx(1.4)
 
     result = run_render(conn, cfg, job_id, "mp4")
@@ -212,3 +212,16 @@ def test_render_after_an_edge_edit_has_the_planned_duration(
     assert d["video"] == pytest.approx(expected, abs=1 / 25)
     assert abs(d["video"] - d["audio"]) <= 1 / 25
     assert result.removed_s == pytest.approx(duration - expected)
+
+
+def test_three_touching_cuts_render_as_one_with_the_planned_duration(
+    cfg: Config, make_video: Callable[..., Path]
+) -> None:
+    src = make_video("ba cắt.mp4", seconds=10.0, fps=30)
+    info = video_info(src)
+    keeps = plan([(1.0, 1.3), (1.3, 1.6), (1.65, 2.0)], info.duration_s, cfg.render, info.fps)
+    assert len(keeps) == 2  # merged before padding: no scraps between the cuts
+    out, _ = render_mp4(src, keeps, paths.output_dir(cfg), cfg.render, encoder="libx264")
+    d = durations(out)
+    assert d["video"] == pytest.approx(sum(e - s for s, e in keeps), abs=1 / 30)
+    assert abs(d["video"] - d["audio"]) <= 1 / 30

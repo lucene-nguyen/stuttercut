@@ -257,7 +257,8 @@ def job_plan(
         with conn:
             conn.execute("UPDATE job SET fps = ?, duration_s = ? WHERE id = ?",
                          (str(fps), duration, job["id"]))  # fmt: skip
-    return plan(repo.approved_cuts(conn, job["id"]), duration, cfg.render, fps), duration
+    words = [(w.start, w.end) for w in repo.get_words(conn, job["id"], "verbatim")]
+    return plan(repo.approved_cuts(conn, job["id"]), duration, cfg.render, fps, words), duration
 
 
 RENDERABLE = ("ready_for_review", "done", "rendering")  # rendering: set by the API on request

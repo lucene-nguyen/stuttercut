@@ -57,11 +57,13 @@ def test_plan_follows_decisions_and_edited_edges_get_no_padding(
     cut = cuts(api, job_id)[0]
     client.patch(f"/api/jobs/{job_id}/cuts/{cut['id']}", json={"kept": False})
     padded = client.get(f"/api/jobs/{job_id}/plan").json()["keep_segments"]
-    assert padded == [{"start_s": 0.0, "end_s": 1.04}, {"start_s": 1.24, "end_s": 10.0}]  # 25 fps
+    # "chào" ends 0.90 and "hôm" starts 1.40: 100 ms of silence on each side (>= 2 x 40 ms), so
+    # both edges move outward into it: 0.96 and 1.34 -> nearest 25 fps frame 1.36
+    assert padded == [{"start_s": 0.0, "end_s": 0.96}, {"start_s": 1.36, "end_s": 10.0}]
     client.patch(f"/api/jobs/{job_id}/cuts/{cut['id']}", json={"start_s": 1.0, "end_s": 1.28})
     exact = client.get(f"/api/jobs/{job_id}/plan").json()["keep_segments"]
-    # start back on the original edge but end edited: start keeps its padding, end gets none
-    assert exact == [{"start_s": 0.0, "end_s": 1.04}, {"start_s": 1.28, "end_s": 10.0}]
+    # start back on the original edge (padded outward), end edited (no padding, on a frame)
+    assert exact == [{"start_s": 0.0, "end_s": 0.96}, {"start_s": 1.28, "end_s": 10.0}]
     assert client.get("/api/jobs/nope/plan").status_code == 404
 
 

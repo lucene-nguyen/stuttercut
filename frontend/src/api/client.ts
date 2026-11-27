@@ -1,3 +1,5 @@
+import type { Plan } from '../features/review/cleanAudio'
+
 // REST + SSE client for the StutterCut API (design doc "API design"). Same origin: Vite proxies /api.
 
 export type Reason = 'filler' | 'repeat' | 'pause' | 'retake'
@@ -48,6 +50,10 @@ export interface Cut {
   decided_at: string | null
   llm_verdict: string | null
   llm_reason: string | null
+  orig_start_s: number
+  orig_end_s: number
+  start_edited: number
+  end_edited: number
 }
 
 export interface JobDetail extends Omit<JobSummary, 'cut_count'> {
@@ -124,6 +130,13 @@ export const api = {
   retry: (id: string) => request<JobSummary>(`/api/jobs/${id}/retry`, { method: 'POST' }),
   reveal: (id: string) => request<void>(`/api/jobs/${id}/reveal`, { method: 'POST' }),
   previewUrl: (id: string) => `/api/jobs/${id}/preview`,
+  previewAudioUrl: (id: string) => `/api/jobs/${id}/preview-audio`,
+  plan: (id: string) => request<Plan>(`/api/jobs/${id}/plan`),
+  setEdges: (id: string, cutId: number, start_s: number, end_s: number) =>
+    request<{ saved_s: number }>(
+      `/api/jobs/${id}/cuts/${cutId}`,
+      json('PATCH', { start_s, end_s }),
+    ),
 }
 
 export interface ProgressEvent {
@@ -183,6 +196,7 @@ export interface Trace {
   total_s: number
   spans: TraceSpan[]
   errors: { ts?: string; msg?: string; step?: string; exc?: string; ffmpeg_stderr?: string }[]
+  files_mb?: Record<string, number> // preview.mp4 / preview.wav in the job folder
 }
 
 export interface LogEntry {

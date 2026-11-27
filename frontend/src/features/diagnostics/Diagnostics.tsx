@@ -41,7 +41,12 @@ export function TraceView({ trace, env }: { trace: Trace; env: Environment | nul
           <span style={{ color: 'var(--text)', fontWeight: 500 }}>{trace.name}</span> · trace{' '}
           {trace.id}
         </span>
-        <span className="mono">total {trace.total_s.toFixed(1)}s</span>
+        <span className="mono">
+          {Object.entries(trace.files_mb ?? {})
+            .map(([name, mb]) => `${name} ${mb} MB · `)
+            .join('')}
+          total {trace.total_s.toFixed(1)}s
+        </span>
       </div>
       {bars.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>

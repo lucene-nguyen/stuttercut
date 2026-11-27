@@ -148,19 +148,6 @@ export function keyAction(key: string, target: EventTarget | null): KeyAction | 
   return KEYS[key] ?? null
 }
 
-/** Preview of the clean version: inside an approved cut, jump to its end. */
-export function skipTarget(t: number, cuts: Cut[]): number | null {
-  let target: number | null = null
-  let pos = t
-  for (const c of [...cuts].sort((a, b) => a.start_s - b.start_s)) {
-    if (cutState(c) === 'cut' && pos >= c.start_s - EPS && pos < c.end_s - EPS) {
-      pos = c.end_s
-      target = pos
-    }
-  }
-  return target
-}
-
 export interface ReasonStats {
   reason: Reason
   total: number

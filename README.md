@@ -47,7 +47,9 @@ Setup from scratch: [docs/guides/setup-mac.md](docs/guides/setup-mac.md),
 [docs/guides/setup-windows.md](docs/guides/setup-windows.md).
 
 Open http://127.0.0.1:5173, drop a video (≤ 3 min), review the suggested cuts, render.
-Review keys: Space play, ←/→ previous/next cut, K keep, X cut, Enter render.
+Review keys: Space play, ←/→ previous/next cut, K keep, X cut, Enter render, Alt+←/→ and
+Shift+←/→ move the selected cut's start / end edge by 10 ms. The clean preview plays exactly the
+segments the render keeps ([ADR 0005](docs/adr/0005-clean-preview-web-audio-and-plan-endpoint.md)).
 
 ## Quality checks
 

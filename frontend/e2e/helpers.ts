@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 
-import type { Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { expect, type Page } from '@playwright/test'
 
 export const media = (name: string) => join(process.env.E2E_TMP!, 'media', name)
 
@@ -18,4 +19,19 @@ export async function upload(page: Page, name: string) {
   ])
   const added = (await jobIds(page)).filter((id) => !before.has(id))
   return { res, added, row: page.locator(`tr[data-job="${added[0]}"]`) }
+}
+
+/** Upload the 10 s test clip and open its Review screen. */
+export async function uploadAndOpen(page: Page) {
+  const { row } = await upload(page, 'bài nói thử.mp4')
+  await expect(row).toContainText('Ready for review', { timeout: 60_000 })
+  await row.getByRole('link', { name: /Review/ }).click()
+  await expect(page.locator('.transcript')).toContainText('Xin')
+}
+
+export async function seriousViolations(page: Page) {
+  const result = await new AxeBuilder({ page }).analyze()
+  return result.violations
+    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)
 }

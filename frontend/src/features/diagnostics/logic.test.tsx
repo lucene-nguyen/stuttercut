@@ -24,6 +24,7 @@ const failed: Trace = {
     { step: 'render', status: 'error', error: 'x', started_at: '', duration_s: 6, offset_s: 34 },
   ],
   errors: [{ step: 'render', ffmpeg_stderr: 'OpenEncodeSessionEx failed: out of memory\n' }],
+  files_mb: { 'preview.mp4': 4.2, 'preview.wav': 16.5 },
 } // prettier-ignore
 const env = {
   os: 'Windows-11',
@@ -69,5 +70,6 @@ describe('failed trace', () => {
     expect(html).toContain('render failed')
     expect(html).toContain('OpenEncodeSessionEx failed')
     expect(html).toContain('Copy error details')
+    expect(html).toContain('preview.wav 16.5 MB')
   })
 })

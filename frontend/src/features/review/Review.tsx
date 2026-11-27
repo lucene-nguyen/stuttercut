@@ -22,12 +22,15 @@ import {
   keyAction,
   reasonStats,
   selectionRange,
-  skipTarget,
   step,
   toggled,
   visibleCuts,
   type CutState,
 } from './logic'
+import { cleanLength, edgeKey, effectiveEdges, nudge, toClean } from './cleanAudio'
+import { EdgeSaver } from './edgeSaver'
+import EdgeEditor from './EdgeEditor'
+import { useCleanPlayer } from './useCleanPlayer'
 
 const STATE_TEXT: Record<CutState, string> = {
   cut: 'will be cut',
@@ -78,7 +81,7 @@ export default function Review({ id, platform }: { id: string; platform: string 
   const [selected, setSelected] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [now, setNow] = useState(0)
-  const [skip, setSkip] = useState(true)
+  const [cleanMode, setCleanMode] = useState(true)
   const [renderOpen, setRenderOpen] = useState(false)
   const [fmt, setFmt] = useState<RenderFormat>('mp4')
   const [folder, setFolder] = useState('')
@@ -93,6 +96,8 @@ export default function Review({ id, platform }: { id: string; platform: string 
   const video = useRef<HTMLVideoElement>(null)
   const transcript = useRef<HTMLDivElement>(null)
   const stopWatch = useRef<(() => void) | null>(null)
+  const player = useCleanPlayer(id, video)
+  const { reloadPlan } = player
 
   const load = useCallback(() => {
     api.getJob(id).then(
@@ -100,10 +105,11 @@ export default function Review({ id, platform }: { id: string; platform: string 
         setJob(j)
         setCuts(j.cuts)
         setSavedS(j.saved_s)
+        void reloadPlan().catch(() => undefined) // the clean preview follows every change
       },
       (e: Error) => setError(e.message),
     )
-  }, [id])
+  }, [id, reloadPlan])
   useEffect(() => {
     load()
     return () => stopWatch.current?.()
@@ -127,12 +133,64 @@ export default function Review({ id, platform }: { id: string; platform: string 
         for (const cutId of ids) saved = (await api.decide(id, cutId, keep)).saved_s
         setSavedS(saved)
         setError('')
+        void reloadPlan()
       } catch (e) {
         setCuts(before)
         setError(`Not saved: ${(e as Error).message}`)
       }
     },
-    [cuts, id, savedS],
+    [cuts, id, reloadPlan, savedS],
+  )
+
+  // Edge saves go through one saver: at most one PATCH per cut in flight, latest edges win. After
+  // a failure the cuts are reloaded from the API once every save has finished (no stale snapshot).
+  const saverHooks = useRef<{
+    onSaved: (s: number) => void
+    onIdle: () => void
+    onError: (e: Error) => void
+  } | null>(null)
+  saverHooks.current = {
+    onSaved: (s) => setSavedS(s),
+    onIdle: () => {
+      if (saveFailed.current) {
+        saveFailed.current = false
+        load()
+      } else void reloadPlan()
+    },
+    onError: (e) => {
+      saveFailed.current = true
+      setError(`Edges not saved: ${e.message}. Reloading the cuts.`)
+    },
+  }
+  const saveFailed = useRef(false)
+  const saver = useMemo(
+    () =>
+      new EdgeSaver({
+        send: (cutId, e) => api.setEdges(id, cutId, e.start, e.end),
+        onSaved: (s) => saverHooks.current?.onSaved(s),
+        onIdle: () => saverHooks.current?.onIdle(),
+        onError: (_cutId, e) => saverHooks.current?.onError(e),
+      }),
+    [id],
+  )
+
+  /** Move a cut's edges (drag, nudge, Alt/Shift+arrows, Reset); this also approves the cut. The UI
+   * changes at once; the saver sends it. */
+  const setEdges = useCallback(
+    (cutId: number, start: number, end: number) => {
+      setError('')
+      setCuts((cs) =>
+        cs.map((c) =>
+          c.id === cutId
+            ? { ...c, start_s: start, end_s: end, approved: 1, kept: 0,
+                start_edited: Math.abs(start - c.orig_start_s) > 1e-6 ? 1 : 0,
+                end_edited: Math.abs(end - c.orig_end_s) > 1e-6 ? 1 : 0 } // prettier-ignore
+            : c,
+        ),
+      )
+      saver.save(cutId, { start, end })
+    },
+    [saver],
   )
 
   async function bulk(action: 'approve_sure' | 'cut_all' | 'keep_all') {
@@ -145,12 +203,19 @@ export default function Review({ id, platform }: { id: string; platform: string 
     }
   }
 
-  const select = useCallback((c: Cut | undefined) => {
-    if (!c) return
-    setSelected(c.id)
-    if (video.current) video.current.currentTime = Math.max(0, c.start_s - 0.3)
-    document.getElementById(`cut-${c.id}`)?.scrollIntoView({ block: 'nearest' })
-  }, [])
+  const { seek, loadAudio } = player
+  const select = useCallback(
+    (c: Cut | undefined) => {
+      if (!c) return
+      setSelected(c.id)
+      const t = Math.max(0, c.start_s - 0.3)
+      if (cleanMode) seek(t)
+      else if (video.current) video.current.currentTime = t
+      void loadAudio() // the edge editor's waveform
+      document.getElementById(`cut-${c.id}`)?.scrollIntoView({ block: 'nearest' })
+    },
+    [cleanMode, loadAudio, seek],
+  )
 
   const startRender = useCallback(async () => {
     setError('')
@@ -177,12 +242,29 @@ export default function Review({ id, platform }: { id: string; platform: string 
   // Keyboard: Space play, K keep, X cut, ←/→ previous/next cut, Enter render.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      const ek = edgeKey(e)
+      if (ek) {
+        // keyAction answers null while typing in a field: then the arrows belong to the field
+        if (!selectedCut || !keyAction(e.key, e.target)) return
+        e.preventDefault()
+        const n = nudge(
+          { start: selectedCut.start_s, end: selectedCut.end_s },
+          ek.edge,
+          ek.delta,
+          duration,
+        )
+        setEdges(selectedCut.id, n.start, n.end)
+        return
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const action = keyAction(e.key, e.target)
       if (!action) return
       e.preventDefault()
       const pos = visible.findIndex((c) => c.id === selected)
-      if (action === 'play' && video.current) {
+      if (action === 'play' && cleanMode) {
+        if (player.playing) player.pause()
+        else void player.play()
+      } else if (action === 'play' && video.current) {
         if (video.current.paused) void video.current.play()
         else video.current.pause()
       } else if (action === 'prev' || action === 'next') {
@@ -196,14 +278,26 @@ export default function Review({ id, platform }: { id: string; platform: string 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [decide, render.state, renderOpen, select, selected, selectedCut, startRender, visible])
+  }, [
+    cleanMode,
+    decide,
+    duration,
+    player,
+    render.state,
+    renderOpen,
+    select,
+    selected,
+    selectedCut,
+    setEdges,
+    startRender,
+    visible,
+  ])
 
-  function onTime() {
-    const v = video.current
-    if (!v) return
-    const target = skip && !v.paused ? skipTarget(v.currentTime, cuts) : null
-    if (target !== null) v.currentTime = Math.min(target, duration)
-    setNow(v.currentTime)
+  function toggleClean(on: boolean) {
+    player.pause()
+    video.current?.pause()
+    if (video.current) video.current.muted = on
+    setCleanMode(on)
   }
 
   async function markMissed() {
@@ -413,18 +507,57 @@ export default function Review({ id, platform }: { id: string; platform: string 
           <video
             ref={video}
             src={api.previewUrl(id)}
-            controls
+            controls={!cleanMode}
+            muted={cleanMode}
+            playsInline
             preload="metadata"
-            onTimeUpdate={onTime}
+            onTimeUpdate={(e) => !cleanMode && setNow(e.currentTarget.currentTime)}
             aria-label="Preview of the video"
           />
           <label className="row muted" style={{ fontSize: 13 }}>
-            <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
-            Play the clean version (skip cuts marked to be cut)
+            <input
+              type="checkbox"
+              checked={cleanMode}
+              onChange={(e) => toggleClean(e.target.checked)}
+            />
+            Play the clean version (exactly what the render keeps)
           </label>
+          {cleanMode && (
+            <div className="row clean-controls">
+              <button
+                className="btn small primary"
+                onClick={() => (player.playing ? player.pause() : void player.play())}
+              >
+                {player.loading
+                  ? 'Loading audio…'
+                  : player.playing
+                    ? 'Pause clean preview'
+                    : 'Play clean preview'}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.01}
+                value={player.position}
+                onChange={(e) => player.seek(Number(e.target.value))}
+                aria-label="Seek in the clean preview (source time)"
+                style={{ flex: 1 }}
+              />
+              <span className="mono muted" style={{ fontSize: 13 }} data-testid="clean-clock">
+                {fmtDur(toClean(player.position, player.plan?.keep_segments ?? []))} /{' '}
+                {fmtDur(cleanLength(player.plan?.keep_segments ?? []))}
+              </span>
+            </div>
+          )}
+          {player.error && (
+            <div role="alert" className="alert">
+              {player.error}
+            </div>
+          )}
           <div>
             <div className="row spread mono muted" style={{ fontSize: 13 }}>
-              <span>{fmtStamp(now)}</span>
+              <span>{fmtStamp(cleanMode ? player.position : now)}</span>
               <span>{fmtStamp(duration)}</span>
             </div>
             <div className="timeline" role="group" aria-label="Timeline with cut markers">
@@ -445,9 +578,33 @@ export default function Review({ id, platform }: { id: string; platform: string 
                   />
                 )
               })}
-              <div className="playhead" style={{ left: `${(now / (duration || 1)) * 100}%` }} />
+              <div
+                className="playhead"
+                style={{
+                  left: `${((cleanMode ? player.position : now) / (duration || 1)) * 100}%`,
+                }}
+              />
             </div>
           </div>
+          {selectedCut && (
+            <EdgeEditor
+              cut={selectedCut}
+              duration={duration}
+              audio={player.audio}
+              loading={player.loading}
+              effective={
+                cutState(selectedCut) === 'cut' && player.plan
+                  ? effectiveEdges(
+                      { start: selectedCut.start_s, end: selectedCut.end_s },
+                      player.plan.keep_segments,
+                      duration,
+                    )
+                  : null
+              }
+              onEdges={(s0, e0) => setEdges(selectedCut.id, s0, e0)}
+              onPlayAround={(t) => void player.playAround(t)}
+            />
+          )}
           <div className="kinds">
             {stats.map((s) => (
               <div key={s.reason} className="kind">
@@ -463,7 +620,8 @@ export default function Review({ id, platform }: { id: string; platform: string 
           </div>
           <p className="muted" style={{ fontSize: 13, margin: 0 }}>
             Keys: <kbd>Space</kbd> play · <kbd>←</kbd>/<kbd>→</kbd> previous/next cut · <kbd>K</kbd>{' '}
-            keep · <kbd>X</kbd> cut · <kbd>Enter</kbd> render
+            keep · <kbd>X</kbd> cut · <kbd>Enter</kbd> render · <kbd>Alt</kbd>+<kbd>←</kbd>/
+            <kbd>→</kbd> start edge · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> end edge (10 ms)
           </p>
         </section>
 

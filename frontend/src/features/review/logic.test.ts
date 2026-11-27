@@ -11,7 +11,6 @@ import {
   keyAction,
   reasonStats,
   selectionRange,
-  skipTarget,
   step,
   toggled,
   visibleCuts,
@@ -21,6 +20,7 @@ const w = (i: number, text: string, start: number, end: number): Word => ({ i, t
 const cut = (id: number, start: number, end: number, extra: Partial<Cut> = {}): Cut => ({
   id, start_s: start, end_s: end, reason: 'filler', source: 'rules', confidence: 0.9,
   tier: 'sure', kept: 0, approved: 0, decided_at: null, llm_verdict: null, llm_reason: null,
+  orig_start_s: start, orig_end_s: end, start_edited: 0, end_edited: 0,
   ...extra,
 }) // prettier-ignore
 
@@ -111,13 +111,8 @@ describe('keyboard', () => {
   })
 })
 
-describe('preview skip and stats', () => {
+describe('stats and selection', () => {
   const cuts = [cut(1, 1, 2, { approved: 1 }), cut(2, 2, 3, { approved: 1 }), cut(3, 5, 6)]
-  it('jumps over approved cuts only, chaining touching ones', () => {
-    expect(skipTarget(1.5, cuts)).toBe(3)
-    expect(skipTarget(5.5, cuts)).toBeNull() // undecided: still played
-    expect(skipTarget(0.5, cuts)).toBeNull()
-  })
   it('counts active cuts and saved seconds per reason', () => {
     const filler = reasonStats(cuts).find((s) => s.reason === 'filler')
     expect(filler).toEqual({ reason: 'filler', total: 3, active: 2, savedS: 2 })

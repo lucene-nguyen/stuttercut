@@ -1,23 +1,8 @@
 // E2E flows of LEARNING-209 with the fake transcriber (tests/fixtures/review_clip.json):
 // 2 sure cuts (filler "ờ", repeat "tôi") and 2 unsure (a pause, the filler "à").
-import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
-import { upload } from './helpers'
-
-async function uploadAndOpen(page: Page) {
-  const { row } = await upload(page, 'bài nói thử.mp4')
-  await expect(row).toContainText('Ready for review', { timeout: 60_000 })
-  await row.getByRole('link', { name: /Review/ }).click()
-  await expect(page.locator('.transcript')).toContainText('Xin')
-}
-
-async function seriousViolations(page: Page) {
-  const result = await new AxeBuilder({ page }).analyze()
-  return result.violations
-    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)
-}
+import { seriousViolations, upload, uploadAndOpen } from './helpers'
 
 test('upload → review → render MP4 + XML', async ({ page }) => {
   await uploadAndOpen(page)

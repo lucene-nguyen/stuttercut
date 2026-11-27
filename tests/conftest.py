@@ -26,6 +26,8 @@ def cfg(tmp_path: Path) -> Config:
     env = {
         "STUTTERCUT_HOME": str(tmp_path / "home"),
         "STUTTERCUT_OUTPUT_DIR": str(tmp_path / "out"),
+        # the RAM pre-flight before a model reload must not depend on the CI runner's free RAM
+        "STUTTERCUT_ASR_MIN_FREE_GB_ANY": "0",
     }
     return load_config(env=env, dotenv=tmp_path / "none")
 

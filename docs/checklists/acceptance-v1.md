@@ -60,17 +60,25 @@ ____, ready after ____ s, cuts ____)
 4. **One missed cut:** select one or two words in the transcript that should go, pick a
    reason, click **Mark missed cut**.
 5. Use the filter chips (Filler, Repeat, Pause, Retake) once each.
-6. Reload the page (F5 / ⌘R).
+6. **Edges:** select a cut whose start clips a syllable or leaves a sound; drag a handle or use
+   **Alt+←/→** (start) and **Shift+←/→** (end); click the waveform next to the edge to hear 1 s
+   there; **Reset edges** once, then edit again.
+7. **Clean preview** (on the Mac: in **Safari**): **Play clean preview** across at least five
+   cuts, including a retake; scrub into the middle of a cut; change one decision while it plays.
+8. Reload the page (F5 / ⌘R).
 
 **Expected:**
 - After step 2 the Sure group shows every sure cut as Cut, and Saved shows time removed.
 - Each toggle updates Clean / Saved / Cuts at once.
-- With "Play the clean version" ticked, playback jumps over the cuts marked Cut.
+- The edge editor shows the times to 10 ms; an edited cut says "edited" and is approved.
+- Clean preview: no part of a cut is heard (no syllable start before a jump), no click at the
+  joins, the picture stays in sync with the voice; scrubbing into a cut continues after it; a
+  changed decision is heard right away. Safari: no error, sound starts on the first click.
 - The missed cut appears struck through and in the list as "marked by you".
 - After the reload every decision and the missed cut are still there.
 
-**Result:** sure approved ____ · toggles ____ · missed cut ok? ____ · decisions kept after
-reload? ____
+**Result:** sure approved ____ · toggles ____ · missed cut ok? ____ · edges ok? ____ · clean
+preview matches the render? ____ (browser ____) · decisions kept after reload? ____
 
 ## D. Render MP4 + XML
 
@@ -162,7 +170,7 @@ ____
 | --- | --- | --- | --- |
 | A. Setup from scratch |  |  |  |
 | B. Upload 2 clips + too-long error |  |  |  |
-| C. Review (approve sure, toggles, missed cut, reload) |  |  |  |
+| C. Review (approve sure, toggles, missed cut, edges, clean preview, reload) |  |  |  |
 | D. Render MP4 + XML |  |  |  |
 | E. Listening check |  |  |  |
 | F. XML in DaVinci Resolve |  |  |  |

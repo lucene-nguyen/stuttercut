@@ -24,15 +24,16 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 
 from stuttercut.asr import Transcriber, Unloadable
 from stuttercut.config import RENDER_FORMATS, Config, LlmConfig
 from stuttercut.llm import LLMClient
 from stuttercut.llm.review import review
-from stuttercut.media.audio import MediaError, extract_audio, make_preview
+from stuttercut.media.audio import MediaError, extract_audio, make_preview, make_preview_audio
 from stuttercut.media.fcpxml import write_xml
-from stuttercut.media.render import RenderError, plan, removed_s, render_mp4, video_info
+from stuttercut.media.render import RenderError, Segment, plan, removed_s, render_mp4, video_info
 from stuttercut.media.vad import VoiceDetector
 from stuttercut.observability.metrics import PeakRss
 from stuttercut.observability.spans import span
@@ -188,6 +189,8 @@ def run_job(
             step = "preview"
             with span(conn, job_id, step):
                 make_preview(Path(job["source_path"]), wav.with_name("preview.mp4"), cfg.media)
+                make_preview_audio(Path(job["source_path"]), wav.with_name("preview.wav"),
+                                   cfg.media)  # fmt: skip
             if isinstance(transcriber, Unloadable) and not transcriber.loaded:
                 step = "load_model"  # freed for the local LLM, or after idle
                 with span(conn, job_id, step):
@@ -238,6 +241,26 @@ def run_llm_review(conn: sqlite3.Connection, cfg: Config, job_id: str, llm: LLMC
     return "ready_for_review"
 
 
+def job_plan(
+    conn: sqlite3.Connection, cfg: Config, job: sqlite3.Row, probe: bool = True
+) -> tuple[list[Segment], float]:
+    """The one cut plan (keep-segments, clip length) behind render, GET /plan and saved time.
+
+    Uses the job's stored length and frame rate; ``probe`` reads a missing frame rate once with
+    ffprobe and stores it (without it, segments are not snapped to frames).
+    """
+    duration = float(job["duration_s"] or 0.0)
+    fps = Fraction(job["fps"]) if job["fps"] else None
+    if probe and (fps is None or not duration):
+        info = video_info(Path(job["source_path"]))
+        fps, duration = info.fps, duration or round(info.duration_s, 3)
+        with conn:
+            conn.execute("UPDATE job SET fps = ?, duration_s = ? WHERE id = ?",
+                         (str(fps), duration, job["id"]))  # fmt: skip
+    words = [(w.start, w.end) for w in repo.get_words(conn, job["id"], "verbatim")]
+    return plan(repo.approved_cuts(conn, job["id"]), duration, cfg.render, fps, words), duration
+
+
 RENDERABLE = ("ready_for_review", "done", "rendering")  # rendering: set by the API on request
 
 
@@ -277,7 +300,10 @@ def run_render(
             info = video_info(source)
             if not info.has_audio:
                 raise RenderError("probe", f"{source.name} has no audio stream")
-            keeps = plan(cuts, info.duration_s, cfg.render, info.fps)
+            if not job["fps"]:
+                with conn:
+                    conn.execute("UPDATE job SET fps = ? WHERE id = ?", (str(info.fps), job_id))
+            keeps, duration = job_plan(conn, cfg, repo.get_job(conn, job_id) or job)
             if out_dir is None:
                 out_dir = paths.output_dir(cfg)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -294,13 +320,13 @@ def run_render(
     repo.update_job(conn, job_id, output_path=str(mp4) if mp4 else None,
                     xml_path=str(xml) if xml else None)  # fmt: skip
     repo.set_status(conn, job_id, "done")
-    removed = removed_s(keeps, info.duration_s)
+    removed = removed_s(keeps, duration)
     log.info(
         "render done",
         extra={"job_id": job_id, "format": fmt, "approved": len(cuts), "segments": len(keeps),
                "removed_s": round(removed, 3), "encoder": encoder},
     )  # fmt: skip
-    return RenderResult("done", len(cuts), removed, info.duration_s - removed, encoder, mp4, xml)
+    return RenderResult("done", len(cuts), removed, duration - removed, encoder, mp4, xml)
 
 
 def run_retry(

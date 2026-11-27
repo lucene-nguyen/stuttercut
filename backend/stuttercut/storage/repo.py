@@ -261,14 +261,31 @@ def approve_cuts(conn: sqlite3.Connection, job_id: str, mode: str) -> int:
     return len(approved_cuts(conn, job_id))
 
 
-def approved_cuts(conn: sqlite3.Connection, job_id: str) -> list[tuple[float, float]]:
-    """(start, end) of the cuts render applies: approved and not kept by the user."""
+def approved_cuts(
+    conn: sqlite3.Connection, job_id: str
+) -> list[tuple[float, float, bool, bool, bool]]:
+    """(start, end, start_edited, end_edited, is_pause) of the cuts render applies."""
     rows = conn.execute(
-        "SELECT start_s, end_s FROM cut WHERE job_id = ? AND approved = 1 AND kept = 0"
-        " ORDER BY start_s",
+        "SELECT start_s, end_s, start_edited, end_edited, reason FROM cut"
+        " WHERE job_id = ? AND approved = 1 AND kept = 0 ORDER BY start_s",
         (job_id,),
     )
-    return [(r["start_s"], r["end_s"]) for r in rows]
+    return [(r["start_s"], r["end_s"], bool(r["start_edited"]), bool(r["end_edited"]),
+             r["reason"] == "pause") for r in rows]  # fmt: skip
+
+
+def set_cut_edges(
+    conn: sqlite3.Connection, job_id: str, cut_id: int, start: float, end: float
+) -> int:
+    """Move a cut's edges; an edge differs from the original = edited. Approves the cut."""
+    with conn:
+        cur = conn.execute(
+            "UPDATE cut SET start_s = ?, end_s = ?,"
+            " start_edited = abs(? - orig_start_s) > 1e-6, end_edited = abs(? - orig_end_s) > 1e-6,"
+            " approved = 1, kept = 0, decided_at = ? WHERE job_id = ? AND id = ?",
+            (start, end, start, end, now_iso(), job_id, cut_id),
+        )
+    return cur.rowcount
 
 
 def latest_job(conn: sqlite3.Connection) -> str | None:

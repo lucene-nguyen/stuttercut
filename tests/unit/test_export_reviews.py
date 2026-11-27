@@ -35,8 +35,10 @@ def test_export_writes_approved_and_hand_marked_cuts(tmp_path: Path) -> None:
     result = export(conn, labels, {"c001"}, [])
 
     data = json.loads((labels / "c001.cuts.json").read_text(encoding="utf-8"))
-    assert data["cuts"] == [{"start": 0.1, "end": 0.3, "type": "filler"},
-                            {"start": 3.0, "end": 3.5, "type": "retake"}]  # fmt: skip
+    assert [{k: c[k] for k in ("start", "end", "type")} for c in data["cuts"]] == [
+        {"start": 0.1, "end": 0.3, "type": "filler"}, {"start": 3.0, "end": 3.5, "type": "retake"},
+    ]  # fmt: skip
+    assert data["cuts"][0]["orig_start"] == 0.1 and data["cuts"][0]["edited"] is False
     assert data["source"] == "review" and data["job_id"] == job
     assert result["c001"].startswith("2 cuts") and "not a clip" in result[other]
 
@@ -54,3 +56,17 @@ def test_export_never_replaces_other_labels_without_force(tmp_path: Path) -> Non
     assert json.loads((labels / "c001.cuts.json").read_text("utf-8")) == audacity
     export(conn, labels, {"c001"}, [], force=True)
     assert json.loads((labels / "c001.cuts.json").read_text("utf-8"))["source"] == "review"
+
+
+def test_export_keeps_original_and_edited_edges(tmp_path: Path) -> None:
+    conn = connect(tmp_path / "s.db")
+    job = repo.create_job(conn, str(tmp_path / "c001.mp4"))
+    repo.replace_cuts(conn, job, [Cut(1.0, 1.4, "filler", "rules", 0.9)])
+    cut_id = repo.get_cuts(conn, job)[0]["id"]
+    repo.set_cut_edges(conn, job, cut_id, 0.95, 1.4)  # start moved by hand, end unchanged
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    export(conn, labels, {"c001"}, [])
+    (cut,) = json.loads((labels / "c001.cuts.json").read_text("utf-8"))["cuts"]
+    assert cut == {"start": 0.95, "end": 1.4, "type": "filler", "orig_start": 1.0,
+                   "orig_end": 1.4, "edited": True}  # fmt: skip

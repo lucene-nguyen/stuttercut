@@ -183,8 +183,13 @@ def load_clips(
         if job is None:
             skipped[clip_id] = "no reviewed or rendered job (run the CLI or upload it in the app)"
             continue
-        preds = [  # what the detector proposed, whatever the user decided; not hand-marked cuts
-            {"start": r["start_s"], "end": r["end_s"], "reason": r["reason"], "source": r["source"]}
+        preds = [  # what the detector proposed (its own edges), whatever the user decided later
+            {
+                "start": r["orig_start_s"],
+                "end": r["orig_end_s"],
+                "reason": r["reason"],
+                "source": r["source"],
+            }
             for r in conn.execute(
                 "SELECT * FROM cut WHERE job_id = ? AND source != 'user'", (job["id"],)
             )

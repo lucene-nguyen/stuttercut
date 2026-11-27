@@ -58,6 +58,7 @@ class MediaConfig:
     sample_rate: int = 16000
     ffmpeg_threads: int = 2
     preview_height: int = 480
+    preview_sample_rate: int = 48000  # the clean preview's WAV (Web Audio)
 
 
 def csv(raw: str) -> tuple[str, ...]:
@@ -155,8 +156,10 @@ ENCODERS = ("auto", "h264_videotoolbox", "h264_nvenc", "libx264")
 class RenderConfig:
     """Render of the clean video and FCP XML export (LEARNING-210)."""
 
-    cut_padding_ms: int = 40  # each cut shrinks by this on both sides: no clipped syllable
+    cut_padding_ms: int = 40  # outer cut edges move this much: into silence, or off a neighbour
     cut_merge_ms: int = 50  # cuts closer than this become one
+    merge_silent_gap_ms: int = 150  # ... and closer than this when no word sits in the gap
+    min_cut_ms: int = 60  # inward padding never makes a cut shorter than this
     min_segment_ms: int = 80  # shorter keep-segments are dropped (cut too)
     join_fade_ms: int = 10  # audio fade out/in at every join: no clicks
     encoder: str = "auto"  # auto = h264_videotoolbox -> h264_nvenc -> libx264
@@ -231,6 +234,7 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_MAX_DURATION_S": ("media", "max_duration_s", float),
     "STUTTERCUT_MAX_UPLOAD_MB": ("media", "max_upload_mb", int),
     "STUTTERCUT_PREVIEW_HEIGHT": ("media", "preview_height", int),
+    "STUTTERCUT_PREVIEW_SAMPLE_RATE": ("media", "preview_sample_rate", int),
     "STUTTERCUT_FFMPEG_THREADS": ("media", "ffmpeg_threads", int),
     "STUTTERCUT_LOG_LEVEL": ("log", "level", str),
     "STUTTERCUT_LOG_MAX_BYTES": ("log", "max_bytes", int),
@@ -275,6 +279,9 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_LLM_LOAD_TIMEOUT_S": ("llm", "load_timeout_s", float),
     "STUTTERCUT_CUT_PADDING_MS": ("render", "cut_padding_ms", int),
     "STUTTERCUT_CUT_MERGE_MS": ("render", "cut_merge_ms", int),
+    "STUTTERCUT_MERGE_SILENT_GAP_MS": ("render", "merge_silent_gap_ms", int),
+    # STUTTERCUT_MIN_CUT_MS is the rule engine's (shortest detected cut); this is render's
+    "STUTTERCUT_RENDER_MIN_CUT_MS": ("render", "min_cut_ms", int),
     "STUTTERCUT_MIN_SEGMENT_MS": ("render", "min_segment_ms", int),
     "STUTTERCUT_JOIN_FADE_MS": ("render", "join_fade_ms", int),
     "STUTTERCUT_ENCODER": ("render", "encoder", str),

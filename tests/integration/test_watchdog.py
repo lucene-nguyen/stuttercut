@@ -204,6 +204,7 @@ def test_reload_preflight_fails_clearly_when_ram_is_short(
     fake = FakeTranscriber(FIXTURES / "review_clip.json")
     fake.unload()
     monkeypatch.setattr("stuttercut.platform.free_ram_gb", lambda: 1.0)
+    cfg = replace(cfg, asr=replace(cfg.asr, min_free_gb_any=3.0))  # the real default
     conn = connect(paths.db_path(cfg))
     job_id = repo.create_job(conn, str(make_video(seconds=2.0)))
     assert run_job(conn, cfg, job_id, fake) == "failed"

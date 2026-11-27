@@ -44,5 +44,9 @@ perfect skip would not have matched the MP4. Cut edges could only follow word ed
   in the v1 acceptance test.
 - The API process makes the preview WAV for jobs created before this change (an audio-only decode,
   about 1 s for a 3-minute clip). New jobs get it from the worker's preview step.
+- Edge edits are saved through one queue per cut (at most one PATCH in flight, latest edges
+  win, 150 ms debounce); a `/plan` answer older than the last request is ignored; after a failed
+  save the cuts are reloaded from the API. The edge editor shows the set edges and the
+  effective ones from the plan, because a 10 ms nudge can land on the same frame.
 - `eval.score_cuts` scores the detector against its own original edges; `eval.export_reviews`
   writes both the original and the edited edges.

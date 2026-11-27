@@ -66,5 +66,9 @@ PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not me
 - The API makes the preview WAV only for jobs from before this change; new jobs get it from the worker.
 - axe flagged the play button (visible text vs `aria-label`); the visible text is now the name. A missing favicon caused console 404s in E2E.
 
+**Review of PR #13**
+- Rapid nudges raced (overlapping PATCH and /plan, stale snapshot restored on error): saves now go through a per-cut queue (latest wins), /plan answers are sequence-checked, errors reload the cuts.
+- The strip shows the effective (frame-snapped) edges next to the set ones.
+
 **Not checked in CI**
 - Listening (clean preview vs MP4, c001 00:51) and Safari: acceptance test step C.

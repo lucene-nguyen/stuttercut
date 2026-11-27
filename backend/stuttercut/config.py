@@ -58,6 +58,7 @@ class MediaConfig:
     sample_rate: int = 16000
     ffmpeg_threads: int = 2
     preview_height: int = 480
+    preview_sample_rate: int = 48000  # the clean preview's WAV (Web Audio)
 
 
 def csv(raw: str) -> tuple[str, ...]:
@@ -231,6 +232,7 @@ _ENV: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "STUTTERCUT_MAX_DURATION_S": ("media", "max_duration_s", float),
     "STUTTERCUT_MAX_UPLOAD_MB": ("media", "max_upload_mb", int),
     "STUTTERCUT_PREVIEW_HEIGHT": ("media", "preview_height", int),
+    "STUTTERCUT_PREVIEW_SAMPLE_RATE": ("media", "preview_sample_rate", int),
     "STUTTERCUT_FFMPEG_THREADS": ("media", "ffmpeg_threads", int),
     "STUTTERCUT_LOG_LEVEL": ("log", "level", str),
     "STUTTERCUT_LOG_MAX_BYTES": ("log", "max_bytes", int),

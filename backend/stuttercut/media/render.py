@@ -1,7 +1,8 @@
 """Render approved cuts into a clean MP4 (LEARNING-210): pure planning + a thin FFmpeg layer.
 
 Planning (no I/O): every approved cut shrinks by ``cut_padding_ms`` on both sides (not at the
-clip's own start or end, where there is no syllable to protect), cuts closer than
+clip's own start or end, where there is no syllable to protect, and not on an edge the user
+moved by hand: that edge is exactly where they want it), cuts closer than
 ``cut_merge_ms`` merge, the rest of the timeline becomes keep-segments, and segments shorter
 than ``min_segment_ms`` are dropped. Boundaries snap outward to the source frame grid, so every
 video segment holds exactly as much time as its audio: no lip-sync drift across many joins.
@@ -56,6 +57,8 @@ class VideoInfo:
 
 
 Segment = tuple[float, float]
+# (start, end) or (start, end, start_edited, end_edited): an edited edge gets no padding.
+PlanCut = tuple[float, float] | tuple[float, float, bool, bool]
 
 
 def video_info(path: Path) -> VideoInfo:
@@ -87,15 +90,16 @@ def video_info(path: Path) -> VideoInfo:
 
 
 def plan(
-    cuts: Sequence[Segment], duration: float, cfg: RenderConfig, fps: Fraction | None = None
+    cuts: Sequence[PlanCut], duration: float, cfg: RenderConfig, fps: Fraction | None = None
 ) -> list[Segment]:
     """Keep-segments [(start, end)] in source seconds, sorted and disjoint."""
     pad, merge = cfg.cut_padding_ms / 1000, cfg.cut_merge_ms / 1000
     shrunk = []
-    for s, e in sorted(cuts):
-        s, e = max(s, 0.0), min(e, duration)
-        s2 = s if s <= 0 else s + pad  # nothing to protect before the clip start
-        e2 = e if e >= duration else e - pad
+    for cut in sorted(cuts):
+        s, e = max(cut[0], 0.0), min(cut[1], duration)
+        start_edited, end_edited = (cut[2], cut[3]) if len(cut) == 4 else (False, False)
+        s2 = s if s <= 0 or start_edited else s + pad  # nothing to protect before the clip start
+        e2 = e if e >= duration or end_edited else e - pad
         if e2 > s2:
             shrunk.append((s2, e2))
     merged: list[list[float]] = []

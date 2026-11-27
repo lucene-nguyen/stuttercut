@@ -145,3 +145,11 @@ def test_free_name_never_overwrites(tmp_path: Path) -> None:
 def test_render_config_rejects_unknown_encoder() -> None:
     with pytest.raises(ValueError, match="STUTTERCUT_ENCODER"):
         RenderConfig(encoder="h265")
+
+
+def test_edited_edges_get_no_padding() -> None:
+    both = plan([(1.0, 2.0, True, True)], 10.0, CFG)
+    assert both == [(0.0, 1.0), (2.0, 10.0)]
+    start_only = plan([(1.0, 2.0, True, False)], 10.0, CFG)
+    assert start_only == [(0.0, 1.0), (pytest.approx(1.96), 10.0)]
+    assert plan([(1.0, 2.0, False, False)], 10.0, CFG) == plan([(1.0, 2.0)], 10.0, CFG)

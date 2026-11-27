@@ -98,3 +98,20 @@ def make_preview(video: Path, out: Path, cfg: MediaConfig) -> None:
         tmp.replace(out)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def make_preview_audio(video: Path, out: Path, cfg: MediaConfig) -> None:
+    """48 kHz mono WAV for the review screen's clean preview (Web Audio). Not the 16 kHz ASR
+    audio: the preview must sound like the render."""
+    tmp = out.with_name(f".{out.name}.part.wav")
+    try:
+        _run(
+            [
+                *("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"),
+                *("-threads", str(cfg.ffmpeg_threads), "-i", str(video), "-vn", "-ac", "1"),
+                *("-ar", str(cfg.preview_sample_rate), "-c:a", "pcm_s16le", "-f", "wav", str(tmp)),
+            ]
+        )
+        tmp.replace(out)
+    finally:
+        tmp.unlink(missing_ok=True)

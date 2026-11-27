@@ -108,6 +108,24 @@ MIGRATIONS: list[str] = [
     ALTER TABLE job ADD COLUMN step TEXT;
     ALTER TABLE job ADD COLUMN step_started_at TEXT;
     """,
+    # 6: cut edge editing (LEARNING-209 follow-up). orig_* = the edges as detected or marked,
+    # kept for eval and "Reset edges"; *_edited = the user moved that edge (no padding then).
+    # A trigger fills orig_* on every insert. job.fps = the source frame rate ("30000/1001"),
+    # stored once so planning does not run ffprobe on every request.
+    """
+    ALTER TABLE cut ADD COLUMN orig_start_s REAL;
+    ALTER TABLE cut ADD COLUMN orig_end_s REAL;
+    ALTER TABLE cut ADD COLUMN start_edited INTEGER NOT NULL DEFAULT 0
+        CHECK (start_edited IN (0, 1));
+    ALTER TABLE cut ADD COLUMN end_edited INTEGER NOT NULL DEFAULT 0
+        CHECK (end_edited IN (0, 1));
+    UPDATE cut SET orig_start_s = start_s, orig_end_s = end_s;
+    CREATE TRIGGER cut_orig_edges AFTER INSERT ON cut WHEN NEW.orig_start_s IS NULL
+    BEGIN
+        UPDATE cut SET orig_start_s = NEW.start_s, orig_end_s = NEW.end_s WHERE id = NEW.id;
+    END;
+    ALTER TABLE job ADD COLUMN fps TEXT;
+    """,
 ]
 
 

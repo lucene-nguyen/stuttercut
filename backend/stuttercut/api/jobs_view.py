@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from stuttercut.config import Config
-from stuttercut.media.render import plan, removed_s
+from stuttercut.media.render import removed_s
 from stuttercut.storage import repo
+from stuttercut.worker.pipeline import job_plan
 
 # Rough seconds of work per second of clip, for a progress bar only (c001 on an RTX 4060:
 # transcribe 85 s for 161 s). The bar stops at 99% until the step really ends.
@@ -34,12 +35,11 @@ def progress(job: sqlite3.Row, now: datetime | None = None) -> int | None:
 
 
 def saved_s(conn: sqlite3.Connection, job: sqlite3.Row, cfg: Config) -> float:
-    """Seconds the approved cuts remove (after padding and merging, as render will)."""
-    duration = job["duration_s"]
-    if not duration:
+    """Seconds the approved cuts remove: the same plan render uses (no ffprobe here)."""
+    if not job["duration_s"]:
         return 0.0
-    return round(removed_s(plan(repo.approved_cuts(conn, job["id"]), duration, cfg.render),
-                           duration), 2)  # fmt: skip
+    keeps, duration = job_plan(conn, cfg, job, probe=False)
+    return round(removed_s(keeps, duration), 2)
 
 
 def summary(conn: sqlite3.Connection, job: sqlite3.Row, cfg: Config) -> dict[str, Any]:
@@ -65,7 +65,8 @@ def summary(conn: sqlite3.Connection, job: sqlite3.Row, cfg: Config) -> dict[str
 def detail(conn: sqlite3.Connection, job: sqlite3.Row, cfg: Config) -> dict[str, Any]:
     words = repo.get_words(conn, job["id"], "verbatim")
     cut_keys = ("id", "start_s", "end_s", "reason", "source", "confidence", "tier", "kept",
-                "approved", "decided_at", "llm_verdict", "llm_reason")  # fmt: skip
+                "approved", "decided_at", "llm_verdict", "llm_reason", "orig_start_s",
+                "orig_end_s", "start_edited", "end_edited")  # fmt: skip
     return {
         **summary(conn, job, cfg),
         "words": [

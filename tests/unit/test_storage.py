@@ -147,7 +147,7 @@ def test_approve_modes_and_latest_renderable_job(conn: sqlite3.Connection) -> No
     kept = repo.get_cuts(conn, job_id)[2]["id"]
     repo.set_cut_kept(conn, kept, True)  # the user restored it: never rendered as a cut
     assert repo.approve_cuts(conn, job_id, "sure") == 1
-    assert repo.approved_cuts(conn, job_id) == [(0.0, 0.3)]
+    assert repo.approved_cuts(conn, job_id) == [(0.0, 0.3, False, False)]
     assert repo.approve_cuts(conn, job_id, "all") == 2
     assert repo.approve_cuts(conn, job_id, "none") == 0
     with pytest.raises(ValueError, match="approve"):
@@ -158,3 +158,45 @@ def test_approve_modes_and_latest_renderable_job(conn: sqlite3.Connection) -> No
     assert repo.latest_job(conn) == job_id
     repo.set_status(conn, job_id, "failed", failed_step="transcribe", error="x")
     assert repo.latest_job(conn) is None
+
+
+def test_migration_6_keeps_original_edges_of_existing_cuts(tmp_path: Path) -> None:
+    raw = sqlite3.connect(tmp_path / "v5.db")
+    raw.executescript("\n".join(MIGRATIONS[:5]) + "\nPRAGMA user_version = 5;")
+    raw.execute("INSERT INTO job (id, source_path) VALUES ('j', 'a.mp4')")
+    raw.execute("INSERT INTO cut (job_id, start_s, end_s, reason, source, confidence)"
+                " VALUES ('j', 1.0, 1.5, 'filler', 'rules', 0.9)")  # fmt: skip
+    raw.commit()
+    raw.close()
+
+    conn = connect(tmp_path / "v5.db")
+    (cut,) = repo.get_cuts(conn, "j")
+    assert (cut["orig_start_s"], cut["orig_end_s"], cut["start_edited"], cut["end_edited"]) == (
+        1.0, 1.5, 0, 0,
+    )  # fmt: skip
+    assert repo.get_job(conn, "j")["fps"] is None
+
+
+def test_edges_are_edited_against_the_original_and_reset_clears_them(
+    conn: sqlite3.Connection,
+) -> None:
+    from stuttercut.rules import Cut
+
+    job_id = repo.create_job(conn, "a.mp4")
+    repo.replace_cuts(conn, job_id, [Cut(1.0, 1.5, "filler", "rules", 0.5)])
+    user = repo.add_user_cut(conn, job_id, 3.0, 3.4, "repeat")
+    cut_id = repo.get_cuts(conn, job_id)[0]["id"]
+    rows = {r["id"]: r for r in repo.get_cuts(conn, job_id)}
+    assert (rows[user]["orig_start_s"], rows[user]["orig_end_s"]) == (3.0, 3.4)  # trigger
+    assert (rows[cut_id]["approved"], rows[cut_id]["decided_at"]) == (0, None)
+
+    assert repo.set_cut_edges(conn, job_id, cut_id, 0.98, 1.5) == 1
+    row = repo.get_cuts(conn, job_id)[0]
+    assert (row["start_s"], row["start_edited"], row["end_edited"]) == (0.98, 1, 0)
+    assert (row["approved"], row["kept"]) == (1, 0) and row["decided_at"]  # editing approves
+    assert repo.approved_cuts(conn, job_id)[0] == (0.98, 1.5, True, False)
+
+    repo.set_cut_edges(conn, job_id, cut_id, 1.0, 1.5)  # "Reset edges"
+    row = repo.get_cuts(conn, job_id)[0]
+    assert (row["start_edited"], row["end_edited"]) == (0, 0)
+    assert repo.set_cut_edges(conn, "other", cut_id, 1.0, 1.2) == 0

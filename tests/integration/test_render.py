@@ -185,3 +185,30 @@ def test_output_locked_briefly_after_writing_is_moved_on_retry(
     out = write_xml(src, [(0.0, 1.0)], info, paths.output_dir(cfg))
     assert out.name == "khóa_clean.xml" and len(calls) == 3
     assert [p.name for p in out.parent.iterdir()] == [out.name]  # no .part file left
+
+
+def test_render_after_an_edge_edit_has_the_planned_duration(
+    cfg: Config, conn: sqlite3.Connection, make_video: Callable[..., Path]
+) -> None:
+    from stuttercut.worker.pipeline import job_plan
+
+    src = make_video("sửa biên.mp4", seconds=10.0, fps=25)
+    job_id = repo.create_job(conn, str(src))
+    assert run_job(conn, cfg, job_id, FakeTranscriber(FIXTURES / "review_clip.json")) == (
+        "ready_for_review"
+    )
+    filler = repo.get_cuts(conn, job_id)[0]  # "ờ" 1.00-1.30
+    repo.set_cut_edges(conn, job_id, filler["id"], 0.9, 1.4)  # wider, edited: no padding
+    job = repo.get_job(conn, job_id)
+    assert job is not None
+    keeps, duration = job_plan(conn, cfg, job)
+    # no padding on edited edges; keep-segments still snap outward to whole frames (A/V sync)
+    assert keeps[0][1] == pytest.approx(0.92) and keeps[1][0] == pytest.approx(1.4)
+
+    result = run_render(conn, cfg, job_id, "mp4")
+    assert result.status == "done" and result.mp4 is not None
+    expected = sum(e - s for s, e in keeps)
+    d = durations(result.mp4)
+    assert d["video"] == pytest.approx(expected, abs=1 / 25)
+    assert abs(d["video"] - d["audio"]) <= 1 / 25
+    assert result.removed_s == pytest.approx(duration - expected)

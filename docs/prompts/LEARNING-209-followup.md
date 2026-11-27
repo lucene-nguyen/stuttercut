@@ -53,4 +53,18 @@ Commit with LEARNING-209 (Conventional Commits). Open the PR, watch CI with gh p
 
 ## Outcome
 
-_Fill in after the PR merges._
+PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not merged by Claude).
+
+**Worked well**
+- `job_plan()` is the one place keep-segments come from; a hypothesis test proves `GET /plan` equals what render encodes.
+- All scheduling and time mapping are pure functions (`cleanAudio.ts`) with 13 vitest tests; the Web Audio hook only applies them.
+- Original edges kept by a SQLite trigger, so every insert path stayed unchanged.
+
+**Had to be corrected or deviated from the prompt**
+- Edited edges still snap outward to the frame grid (≤ 1 frame) with the keep-segments: A/V sync over 10 ms precision.
+- Clean mode has its own Play/Pause/scrub instead of the native controls (the native ones would play the video's audio).
+- The API makes the preview WAV only for jobs from before this change; new jobs get it from the worker.
+- axe flagged the play button (visible text vs `aria-label`); the visible text is now the name. A missing favicon caused console 404s in E2E.
+
+**Not checked in CI**
+- Listening (clean preview vs MP4, c001 00:51) and Safari: acceptance test step C.

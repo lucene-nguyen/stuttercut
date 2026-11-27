@@ -23,11 +23,16 @@ test('nudge cut edges, see the times, and the plan is fetched again', async ({ p
   expect((await patch).postDataJSON()).toEqual({ start_s: 0.99, end_s: 1.3 })
   await plan
   await expect(page.getByTestId('edge-start')).toHaveText('00:00.99')
+  // effective = where the 25 fps render really cuts: the edited start (no padding) 0.99 → frame 1.00;
+  // the unedited end 1.30 − 40 ms padding = 1.26 → frame 1.24
+  await expect(page.getByTestId('edge-start-eff')).toHaveText('00:01.00')
+  await expect(page.getByTestId('edge-end-eff')).toHaveText('00:01.24')
 
   const planAgain = page.waitForRequest((r) => r.method() === 'GET' && r.url().endsWith('/plan'))
   await page.keyboard.press('Shift+ArrowRight') // end edge +10 ms
   await planAgain
   await expect(page.getByTestId('edge-end')).toHaveText('00:01.31')
+  await expect(page.getByTestId('edge-end-eff')).toHaveText('00:01.28') // edited 1.31 → frame 1.28
   await expect(editor).toContainText('edited')
   await expect(page.locator('button.tok', { hasText: /^ờ$/ })).toHaveClass(/\bcut\b/) // approved
 
@@ -62,4 +67,18 @@ test('clean mode plays and pauses without errors, and can be switched off', asyn
   await expect(page.getByRole('button', { name: /clean preview/ })).toHaveCount(0)
   expect(await seriousViolations(page)).toEqual([])
   expect(errors).toEqual([])
+})
+
+test('five fast nudges save the last value', async ({ page }) => {
+  await uploadAndOpen(page)
+  await page.locator('h2#tr').click()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('edge-start')).toHaveText('00:01.00')
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Alt+ArrowLeft')
+  await expect(page.getByTestId('edge-start')).toHaveText('00:00.95')
+  await page.waitForResponse((r) => r.url().endsWith('/plan')) // saves settled, plan refreshed
+  await page.reload()
+  await page.locator('h2#tr').click()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByTestId('edge-start')).toHaveText('00:00.95')
 })

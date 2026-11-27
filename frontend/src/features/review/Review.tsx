@@ -27,7 +27,8 @@ import {
   visibleCuts,
   type CutState,
 } from './logic'
-import { cleanLength, edgeKey, nudge, toClean } from './cleanAudio'
+import { cleanLength, edgeKey, effectiveEdges, nudge, toClean } from './cleanAudio'
+import { EdgeSaver } from './edgeSaver'
 import EdgeEditor from './EdgeEditor'
 import { useCleanPlayer } from './useCleanPlayer'
 
@@ -141,10 +142,43 @@ export default function Review({ id, platform }: { id: string; platform: string 
     [cuts, id, reloadPlan, savedS],
   )
 
-  /** Move a cut's edges (drag, nudge, Alt/Shift+arrows, Reset); this also approves the cut. */
+  // Edge saves go through one saver: at most one PATCH per cut in flight, latest edges win. After
+  // a failure the cuts are reloaded from the API once every save has finished (no stale snapshot).
+  const saverHooks = useRef<{
+    onSaved: (s: number) => void
+    onIdle: () => void
+    onError: (e: Error) => void
+  } | null>(null)
+  saverHooks.current = {
+    onSaved: (s) => setSavedS(s),
+    onIdle: () => {
+      if (saveFailed.current) {
+        saveFailed.current = false
+        load()
+      } else void reloadPlan()
+    },
+    onError: (e) => {
+      saveFailed.current = true
+      setError(`Edges not saved: ${e.message}. Reloading the cuts.`)
+    },
+  }
+  const saveFailed = useRef(false)
+  const saver = useMemo(
+    () =>
+      new EdgeSaver({
+        send: (cutId, e) => api.setEdges(id, cutId, e.start, e.end),
+        onSaved: (s) => saverHooks.current?.onSaved(s),
+        onIdle: () => saverHooks.current?.onIdle(),
+        onError: (_cutId, e) => saverHooks.current?.onError(e),
+      }),
+    [id],
+  )
+
+  /** Move a cut's edges (drag, nudge, Alt/Shift+arrows, Reset); this also approves the cut. The UI
+   * changes at once; the saver sends it. */
   const setEdges = useCallback(
-    async (cutId: number, start: number, end: number) => {
-      const before = cuts
+    (cutId: number, start: number, end: number) => {
+      setError('')
       setCuts((cs) =>
         cs.map((c) =>
           c.id === cutId
@@ -154,16 +188,9 @@ export default function Review({ id, platform }: { id: string; platform: string 
             : c,
         ),
       )
-      try {
-        setSavedS((await api.setEdges(id, cutId, start, end)).saved_s)
-        setError('')
-        await reloadPlan()
-      } catch (e) {
-        setCuts(before)
-        setError(`Edges not saved: ${(e as Error).message}`)
-      }
+      saver.save(cutId, { start, end })
     },
-    [cuts, id, reloadPlan],
+    [saver],
   )
 
   async function bulk(action: 'approve_sure' | 'cut_all' | 'keep_all') {
@@ -226,7 +253,7 @@ export default function Review({ id, platform }: { id: string; platform: string 
           ek.delta,
           duration,
         )
-        void setEdges(selectedCut.id, n.start, n.end)
+        setEdges(selectedCut.id, n.start, n.end)
         return
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -565,7 +592,16 @@ export default function Review({ id, platform }: { id: string; platform: string 
               duration={duration}
               audio={player.audio}
               loading={player.loading}
-              onEdges={(s0, e0) => void setEdges(selectedCut.id, s0, e0)}
+              effective={
+                cutState(selectedCut) === 'cut' && player.plan
+                  ? effectiveEdges(
+                      { start: selectedCut.start_s, end: selectedCut.end_s },
+                      player.plan.keep_segments,
+                      duration,
+                    )
+                  : null
+              }
+              onEdges={(s0, e0) => setEdges(selectedCut.id, s0, e0)}
               onPlayAround={(t) => void player.playAround(t)}
             />
           )}

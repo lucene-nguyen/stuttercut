@@ -170,3 +170,18 @@ export function fmtEdge(t: number): string {
   const s = (cs % 6000) / 100
   return `${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}`
 }
+
+/** Where a cut really starts and ends in the plan: keep-segments snap outward to whole frames
+ * and neighbouring cuts merge, so a 10 ms nudge may change nothing. null when the plan keeps the
+ * middle of the cut (not approved, or too short once padded). */
+export function effectiveEdges(
+  edges: { start: number; end: number },
+  keeps: Keep[],
+  duration: number,
+): { start: number; end: number } | null {
+  const mid = (edges.start + edges.end) / 2
+  if (keeps.some((k) => mid >= k.start_s && mid < k.end_s)) return null
+  const before = keeps.filter((k) => k.end_s <= mid).pop()
+  const after = keeps.find((k) => k.start_s >= mid)
+  return { start: before ? before.end_s : 0, end: after ? after.start_s : duration }
+}

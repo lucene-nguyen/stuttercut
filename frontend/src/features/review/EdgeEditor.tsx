@@ -12,6 +12,7 @@ interface Props {
   duration: number
   audio: AudioBuffer | null
   loading: boolean
+  effective: { start: number; end: number } | null // where the plan really cuts (frame-snapped)
   onEdges: (start: number, end: number) => void
   onPlayAround: (t: number) => void
 }
@@ -21,6 +22,7 @@ export default function EdgeEditor({
   duration,
   audio,
   loading,
+  effective,
   onEdges,
   onPlayAround,
 }: Props) {
@@ -107,6 +109,16 @@ export default function EdgeEditor({
             background: color,
           }}
         />
+        {effective && (
+          <span
+            className="edge-effective"
+            style={{
+              left: pct(effective.start),
+              width: `calc(${pct(effective.end)} - ${pct(effective.start)})`,
+            }}
+            title="What the render cuts: segments snap to whole frames"
+          />
+        )}
         {edited && (
           <>
             <span
@@ -132,7 +144,13 @@ export default function EdgeEditor({
           <div key={edge} className="row" style={{ gap: 6 }}>
             <span>
               {edge === 'start' ? 'Start' : 'End'}{' '}
-              <b data-testid={`edge-${edge}`}>{fmtEdge(edges[edge])}</b>
+              <b data-testid={`edge-${edge}`}>{fmtEdge(edges[edge])}</b> set ·{' '}
+              <span className="muted" title="The render snaps to whole frames">
+                <span data-testid={`edge-${edge}-eff`}>
+                  {effective ? fmtEdge(effective[edge]) : '—'}
+                </span>{' '}
+                effective
+              </span>
             </span>
             <button
               className="btn small"

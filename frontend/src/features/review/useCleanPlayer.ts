@@ -1,9 +1,10 @@
 // Web Audio clean preview (ADR 0005): the preview WAV plays the plan's keep-segments back to back
 // on the AudioContext clock with the render's fades; the muted video follows the audio.
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 
 import { api } from '../../api/client'
 import { gainRamp, schedule, snapToKeep, sourceAt, type Plan, type Scheduled } from './cleanAudio'
+import { latest } from './edgeSaver'
 
 const DRIFT_S = 0.08 // the video is re-seeked when it is further than this from the audio
 const LEAD_S = 0.05 // schedule slightly ahead so the first part never starts in the past
@@ -157,11 +158,14 @@ export function useCleanPlayer(
     [finish, video],
   )
 
+  const fetchPlan = useMemo(() => latest(() => api.plan(jobId)), [jobId])
   const reloadPlan = useCallback(async () => {
-    plan.current = await api.plan(jobId)
-    setPlan(plan.current)
+    const { fresh, value } = await fetchPlan()
+    if (!fresh) return // a newer /plan request is on its way: never apply an older answer
+    plan.current = value
+    setPlan(value)
     if (isPlaying.current) start(pos.current) // reschedule from where the listener is
-  }, [jobId, start])
+  }, [fetchPlan, start])
 
   const play = useCallback(async () => {
     await running() // inside the click / key press: required by Safari

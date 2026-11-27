@@ -4,7 +4,9 @@ Usage: python -m eval.export_reviews [--labels eval/labels] [--force]
 
 A reviewed job (at least one decision saved in the Review screen) becomes the labels of its
 clip: every cut the user approved or marked by hand (and did not keep) is a label
-{"start", "end", "type"}; kept and undecided suggestions are not. The clip is the job's file
+{"start", "end", "type"} with the edges as the user left them, plus "orig_start" / "orig_end"
+(the detector's or the first marked edges) and "edited" when an edge was moved; kept and
+undecided suggestions are not. The clip is the job's file
 name: "<clip_id>.<ext>", or the original name recorded in $STUTTERCUT_DATA_DIR/index.csv.
 The newest reviewed job per clip wins. A label file made another way (Audacity) is never
 overwritten unless --force. Then: python -m eval.score_cuts.
@@ -46,12 +48,15 @@ def reviewed_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def labels_of(conn: sqlite3.Connection, job_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT start_s, end_s, reason FROM cut WHERE job_id = ? AND approved = 1 AND kept = 0"
-        " ORDER BY start_s",
+        "SELECT * FROM cut WHERE job_id = ? AND approved = 1 AND kept = 0 ORDER BY start_s",
         (job_id,),
     )
-    return [{"start": round(r["start_s"], 3), "end": round(r["end_s"], 3), "type": r["reason"]}
-            for r in rows]  # fmt: skip
+    return [
+        {"start": round(r["start_s"], 3), "end": round(r["end_s"], 3), "type": r["reason"],
+         "orig_start": round(r["orig_start_s"], 3), "orig_end": round(r["orig_end_s"], 3),
+         "edited": bool(r["start_edited"] or r["end_edited"])}
+        for r in rows
+    ]  # fmt: skip
 
 
 def export(

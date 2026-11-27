@@ -26,7 +26,9 @@ def get_metrics(request: Request, days: int = 7) -> dict[str, Any]:
 @router.get("/jobs/{job_id}/trace")
 def get_trace(request: Request, job_id: str) -> dict[str, Any]:
     with db(request) as conn:
-        found = diagnostics.trace(conn, job_id, paths.log_dir(request.app.state.cfg))
+        cfg = request.app.state.cfg
+        found = diagnostics.trace(conn, job_id, paths.log_dir(cfg),
+                                  paths.data_dir(cfg) / "jobs" / job_id)  # fmt: skip
     if found is None:
         raise HTTPException(404, f"no job {job_id}")
     return found

@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import sqlite3
+import threading
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
@@ -17,11 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from stuttercut.api import jobs_view
 from stuttercut.config import RENDER_FORMATS, Config
-from stuttercut.media.audio import MediaError
+from stuttercut.media.audio import MediaError, make_preview_audio
 from stuttercut.media.render import video_info
 from stuttercut.rules import REASONS
 from stuttercut.storage import paths, repo
 from stuttercut.storage.db import connect
+from stuttercut.worker.pipeline import job_plan
 
 router = APIRouter(prefix="/api/jobs")
 
@@ -135,19 +137,77 @@ def preview(request: Request, job_id: str) -> FileResponse:
     return FileResponse(path, media_type="video/mp4")
 
 
-class Decision(BaseModel):
+class CutPatch(BaseModel):
+    """Either a decision ({"kept": true|false}) or new edges ({"start_s", "end_s"})."""
+
     model_config = ConfigDict(extra="forbid")
-    kept: bool
+    kept: bool | None = None
+    start_s: float | None = None
+    end_s: float | None = None
+
+
+MIN_CUT_S = 0.02
 
 
 @router.patch("/{job_id}/cuts/{cut_id}")
-def decide_one(request: Request, job_id: str, cut_id: int, body: Decision) -> dict[str, Any]:
-    """Keep (not cut) or cut one segment; saved at once with a timestamp."""
+def patch_cut(request: Request, job_id: str, cut_id: int, body: CutPatch) -> dict[str, Any]:
+    """Keep or cut one segment, or move its edges (which also approves it). Saved at once."""
+    edges = body.start_s is not None or body.end_s is not None
+    if edges == (body.kept is not None) or (edges and (body.start_s is None or body.end_s is None)):
+        raise HTTPException(422, "send either kept, or both start_s and end_s")
     with db(request) as conn:
         job = _job(conn, job_id)
-        if repo.decide(conn, job_id, [cut_id], keep=body.kept) == 0:
+        if edges:
+            assert body.start_s is not None and body.end_s is not None
+            duration = float(job["duration_s"] or 0)
+            if not 0 <= body.start_s < body.end_s <= duration + 1e-6:
+                raise HTTPException(422, f"edges must satisfy 0 ≤ start < end ≤ {duration:.2f} s")
+            if body.end_s - body.start_s < MIN_CUT_S - 1e-9:
+                raise HTTPException(422, f"a cut must be at least {MIN_CUT_S * 1000:.0f} ms long")
+            changed = repo.set_cut_edges(conn, job_id, cut_id, round(body.start_s, 3),
+                                         round(body.end_s, 3))  # fmt: skip
+        else:
+            changed = repo.decide(conn, job_id, [cut_id], keep=bool(body.kept))
+        if changed == 0:
             raise HTTPException(404, f"no cut {cut_id} in job {job_id}")
         return {"saved_s": jobs_view.saved_s(conn, job, request.app.state.cfg)}
+
+
+@router.get("/{job_id}/plan")
+def get_plan(request: Request, job_id: str) -> dict[str, Any]:
+    """The keep-segments render will use for the current decisions (clean preview, ADR 0005)."""
+    cfg = request.app.state.cfg
+    with db(request) as conn:
+        job = _job(conn, job_id)
+        try:
+            keeps, duration = job_plan(conn, cfg, job)
+        except MediaError as e:
+            raise HTTPException(409, f"cannot read the source video: {e}") from None
+    return {
+        "keep_segments": [{"start_s": round(s, 6), "end_s": round(e, 6)} for s, e in keeps],
+        "fade_ms": cfg.render.join_fade_ms,
+        "duration_s": duration,
+    }
+
+
+_audio_lock = threading.Lock()
+
+
+@router.get("/{job_id}/preview-audio")
+def preview_audio(request: Request, job_id: str) -> FileResponse:
+    """48 kHz mono WAV of the source for the clean preview; made on first use (jobs from before
+    the worker made it), then reused. Served with HTTP Range."""
+    cfg = request.app.state.cfg
+    with db(request) as conn:
+        job = _job(conn, job_id)
+    path = paths.data_dir(cfg) / "jobs" / job_id / "preview.wav"
+    with _audio_lock:  # shortcut: audio-only decode (~1 s for 3 min) in the API, old jobs only
+        if not path.is_file():
+            try:
+                make_preview_audio(Path(job["source_path"]), path, cfg.media)
+            except MediaError as e:
+                raise HTTPException(409, f"cannot make the preview audio: {e}") from None
+    return FileResponse(path, media_type="audio/wav")
 
 
 class Bulk(BaseModel):

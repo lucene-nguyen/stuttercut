@@ -106,8 +106,14 @@ def metrics(conn: sqlite3.Connection, days: int = 7, now: datetime | None = None
     }
 
 
-def trace(conn: sqlite3.Connection, job_id: str, log_dir: Path) -> dict[str, Any] | None:
-    """Spans of one job as a waterfall (offset from the first span), plus its error lines."""
+PREVIEW_FILES = ("preview.mp4", "preview.wav")
+
+
+def trace(
+    conn: sqlite3.Connection, job_id: str, log_dir: Path, job_dir: Path | None = None
+) -> dict[str, Any] | None:
+    """Spans of one job as a waterfall (offset from the first span), its error lines, and the
+    size of its preview files (MB) when ``job_dir`` is given."""
     job = repo.get_job(conn, job_id)
     if job is None:
         return None
@@ -135,6 +141,11 @@ def trace(conn: sqlite3.Connection, job_id: str, log_dir: Path) -> dict[str, Any
         "total_s": round(total, 3),
         "spans": rows,
         "errors": errors,
+        "files_mb": {
+            name: round((job_dir / name).stat().st_size / 2**20, 1)
+            for name in PREVIEW_FILES
+            if job_dir is not None and (job_dir / name).is_file()
+        },
     }
 
 

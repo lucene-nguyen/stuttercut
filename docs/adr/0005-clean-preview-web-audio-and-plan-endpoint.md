@@ -30,9 +30,14 @@ perfect skip would not have matched the MP4. Cut edges could only follow word ed
 3. **Edges finer than words.** `PATCH /api/jobs/{id}/cuts/{cut_id} {start_s, end_s}` (0 ≤ start <
    end ≤ duration, ≥ 20 ms) moves a cut and approves it. The cut keeps its `orig_start_s` /
    `orig_end_s` (for eval and Reset) and flags `start_edited` / `end_edited`. An edited edge gets
-   **no padding**; unedited edges keep `STUTTERCUT_CUT_PADDING_MS`. Keep-segments still snap
-   outward to whole frames, so an edited edge can move by up to one frame (33 ms at 30 fps) toward
-   keeping more: A/V sync wins over 10 ms precision.
+   **no padding**, and so does a pause cut's edge (the pause rule already keeps its margin).
+4. **Planning order** (PR #13 review, part 2; lesson 006): group first (gap < 50 ms, or < 150 ms
+   with no word in it), then pad only the group's outer edges: outward by 40 ms into silence when
+   the nearest kept word is at least 80 ms away, else inward, never below 60 ms
+   (`STUTTERCUT_RENDER_MIN_CUT_MS`). Each cut edge then goes to the **nearest** frame; a cut
+   under one frame becomes one frame around its middle. An edited edge can move by up to half a
+   frame (17 ms at 30 fps) in either direction; the edge editor shows the set and the effective
+   edges.
 
 ## Consequences
 

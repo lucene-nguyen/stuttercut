@@ -70,5 +70,8 @@ PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not me
 - Rapid nudges raced (overlapping PATCH and /plan, stale snapshot restored on error): saves now go through a per-cut queue (latest wins), /plan answers are sequence-checked, errors reload the cuts.
 - The strip shows the effective (frame-snapped) edges next to the set ones.
 
+**Review of PR #13, part 2**
+- Render planning had three ordering bugs (touching cuts left scraps, short cuts vanished, pause cuts double-padded). New order: group (silent gaps too), pad outer edges into silence or inward, nearest frame with a one-frame minimum (lesson 006).
+
 **Not checked in CI**
 - Listening (clean preview vs MP4, c001 00:51) and Safari: acceptance test step C.

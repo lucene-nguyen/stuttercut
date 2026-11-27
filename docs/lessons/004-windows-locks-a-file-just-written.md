@@ -22,7 +22,8 @@ it into place on success, so a failed render never leaves a half-written file.
    after the write can then fail. Fix: `media/render.py` `move_into_place` and `discard` retry
    on `PermissionError` (20 × 0.1 s); a delete that still fails is logged, never raised over the
    real error.
-2. Snap every keep-segment to the source frame grid (outward, so the 40 ms padding is never
+2. (Since lesson 006: cut edges snap to the nearest frame, and padding moves into silence.)
+   Snap every keep-segment to the source frame grid (outward, so the 40 ms padding is never
    eaten) and both streams hold the same time per segment: no drift however many joins.
 
 ## Evidence

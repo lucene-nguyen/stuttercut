@@ -53,7 +53,7 @@ Commit with LEARNING-209 (Conventional Commits). Open the PR, watch CI with gh p
 
 ## Outcome
 
-PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not merged by Claude).
+PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (merged 2026-11-27, squash `1bad14b`; merged with `--admin` at the owner's explicit request after the listening check).
 
 **Worked well**
 - `job_plan()` is the one place keep-segments come from; a hypothesis test proves `GET /plan` equals what render encodes.
@@ -61,7 +61,7 @@ PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not me
 - Original edges kept by a SQLite trigger, so every insert path stayed unchanged.
 
 **Had to be corrected or deviated from the prompt**
-- Edited edges still snap outward to the frame grid (≤ 1 frame) with the keep-segments: A/V sync over 10 ms precision.
+- Cut edges, edited ones included, go to the nearest frame (≤ half a frame, review part 2); the editor shows set and effective edges.
 - Clean mode has its own Play/Pause/scrub instead of the native controls (the native ones would play the video's audio).
 - The API makes the preview WAV only for jobs from before this change; new jobs get it from the worker.
 - axe flagged the play button (visible text vs `aria-label`); the visible text is now the name. A missing favicon caused console 404s in E2E.
@@ -73,5 +73,5 @@ PR: https://github.com/lucene-nguyen/stuttercut/pull/13 (open for review; not me
 **Review of PR #13, part 2**
 - Render planning had three ordering bugs (touching cuts left scraps, short cuts vanished, pause cuts double-padded). New order: group (silent gaps too), pad outer edges into silence or inward, nearest frame with a one-frame minimum (lesson 006).
 
-**Not checked in CI**
-- Listening (clean preview vs MP4, c001 00:51) and Safari: acceptance test step C.
+**Checked by hand**
+- 2026-11-27: the owner listened to the clean preview and the render (acceptance test step C) and approved the PR.
